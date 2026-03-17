@@ -28,8 +28,6 @@ NUMERO_CAMI = os.getenv("NUMERO_CAMI", "")
 conversaciones = {}
 
 # Nombre de hoja: siempre usar el mes actual
-SHEET_NAME = f"F. {datetime.now().strftime('%B')}"  # Ej: "F. March"
-# O en español:
 MESES_ES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", 
             "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
 SHEET_NAME = f"F. {MESES_ES[datetime.now().month - 1]}"
@@ -357,7 +355,7 @@ def manejar_pagador(from_number, respuesta):
         message = (
             f"✅ Pagó: *{pagador}*\n\n"
             f"📊 ¿Cómo se divide?\n\n"
-            f"1️⃣ 100% (solo quien pagó)\n"
+            f"1️⃣ 100% (debe pagar el otro)\n"
             f"2️⃣ 50/50\n"
             f"3️⃣ % (Manu 57% / Cami 43%)\n\n"
             f"Responde *1*, *2* o *3*"
@@ -392,12 +390,12 @@ def manejar_tipo_division(from_number, respuesta):
         # Encontrar fila correcta en la categoría
         fila = encontrar_fila_categoria(datos['categoria'])
         
-        # Preparar datos (sin calcular H, lo hace la fórmula)
-        # Columnas: B=Categoría, C=(vacío), D=Monto, E=(vacío), F=Quién pagó, G=Tipo
+        # Preparar datos
+        # Columnas: A=(vacío), B=(vacío), C=Tienda, D=Monto, E=(vacío), F=Quién pagó, G=Tipo, H=(calculado)
         nueva_fila = [
-            "",  # A (vacío o fecha si quieres)
-            datos['tienda'],  # B
-            "",  # C (vacío)
+            "",  # A (vacío)
+            "",  # B (vacío)
+            datos['tienda'],  # C - NOMBRE DE TRANSACCIÓN
             datos['monto'],  # D
             "",  # E (vacío)
             datos['pagador'],  # F
