@@ -20,14 +20,24 @@ META_ACCESS_TOKEN = os.getenv("META_ACCESS_TOKEN")
 META_PHONE_NUMBER_ID = os.getenv("META_PHONE_NUMBER_ID")
 META_VERIFY_TOKEN = os.getenv("META_VERIFY_TOKEN")
 
+# Números de usuarios
+NUMERO_MANU = os.getenv("NUMERO_MANU", "56995438310")
+NUMERO_CAMI = os.getenv("NUMERO_CAMI", "")
+
 # Conversaciones temporales
 conversaciones = {}
+
+# Nombre de hoja: siempre usar el mes actual
+SHEET_NAME = f"F. {datetime.now().strftime('%B')}"  # Ej: "F. March"
+# O en español:
+MESES_ES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", 
+            "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
+SHEET_NAME = f"F. {MESES_ES[datetime.now().month - 1]}"
 
 
 def get_sheet():
     """Conecta con Google Sheets"""
     spreadsheet_id = os.getenv("SPREADSHEET_ID")
-    worksheet_name = os.getenv("WORKSHEET_NAME", "Compras")
     creds_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
 
     if not spreadsheet_id or not creds_json:
@@ -38,18 +48,65 @@ def get_sheet():
 
     client = gspread.authorize(creds)
     spreadsheet = client.open_by_key(spreadsheet_id)
-    return spreadsheet.worksheet(worksheet_name)
+    return spreadsheet.worksheet(SHEET_NAME)
+
+
+def get_categorias():
+    """Obtiene las categorías desde B7 en adelante"""
+    try:
+        sheet = get_sheet()
+        # Leer columna B desde fila 7 hasta encontrar vacío
+        categorias_raw = sheet.col_values(2)[6:]  # B7 en adelante (índice 6)
+        
+        # Filtrar solo categorías únicas y no vacías
+        categorias = []
+        for cat in categorias_raw:
+            cat = cat.strip()
+            if cat and cat not in categorias:
+                # Buscar títulos (Hogar, Compras, Otros)
+                if cat in ['Hogar', 'Compras', 'Otros']:
+                    categorias.append(cat)
+        
+        return categorias if categorias else ['Hogar', 'Compras', 'Otros']
+    except Exception as e:
+        print(f"Error obteniendo categorías: {e}")
+        return ['Hogar', 'Compras', 'Otros']
+
+
+def encontrar_fila_categoria(categoria):
+    """Encuentra la fila donde insertar un nuevo gasto en la categoría"""
+    try:
+        sheet = get_sheet()
+        # Buscar la fila de la categoría
+        cell = sheet.find(categoria, in_column=2)  # Buscar en columna B
+        
+        if cell:
+            fila_categoria = cell.row
+            # Buscar la siguiente fila vacía en esa sección
+            valores_columna_b = sheet.col_values(2)
+            
+            # Desde la fila de la categoría, buscar hasta encontrar vacío o siguiente categoría
+            for i in range(fila_categoria, len(valores_columna_b)):
+                if not valores_columna_b[i].strip():
+                    return i + 1  # +1 porque las listas empiezan en 0
+                # Si encontramos otra categoría, insertar antes
+                if valores_columna_b[i].strip() in ['Hogar', 'Compras', 'Otros'] and i != fila_categoria:
+                    return i
+            
+            # Si llegamos aquí, agregar al final
+            return len(valores_columna_b) + 1
+        else:
+            # Si no encuentra la categoría, agregar al final
+            return len(sheet.col_values(2)) + 1
+            
+    except Exception as e:
+        print(f"Error encontrando fila: {e}")
+        return 30  # Fila por defecto
 
 
 def send_meta_message(to_number, message):
     """Envía mensaje con Meta Cloud API"""
     try:
-        print(f"🔵 send_meta_message called")
-        print(f"🔵 to_number: {to_number}")
-        print(f"🔵 message preview: {message[:100]}...")
-        print(f"🔵 META_PHONE_NUMBER_ID: {META_PHONE_NUMBER_ID}")
-        print(f"🔵 META_ACCESS_TOKEN exists: {bool(META_ACCESS_TOKEN)}")
-        
         url = f"https://graph.facebook.com/v18.0/{META_PHONE_NUMBER_ID}/messages"
         
         headers = {
@@ -57,9 +114,7 @@ def send_meta_message(to_number, message):
             "Content-Type": "application/json"
         }
         
-        # Limpiar número (solo dígitos)
         clean_number = re.sub(r'\D', '', str(to_number))
-        print(f"🔵 clean_number: {clean_number}")
         
         data = {
             "messaging_product": "whatsapp",
@@ -70,43 +125,76 @@ def send_meta_message(to_number, message):
             }
         }
         
-        print(f"🔵 Sending POST to: {url}")
         response = requests.post(url, headers=headers, json=data, timeout=30)
-        print(f"🔵 Response status: {response.status_code}")
-        print(f"🔵 Response body: {response.text}")
-        
         return response.json()
         
     except Exception as e:
-        print(f"❌ ERROR in send_meta_message: {e}")
+        print(f"❌ ERROR sending message: {e}")
         import traceback
         traceback.print_exc()
         return None
+
+
+def notificar_pareja(from_number, datos):
+    """Notifica a la pareja cuando alguien registra un gasto"""
+    if not NUMERO_CAMI:
+        return  # No notificar si no está configurado
+    
+    # Determinar quién registró
+    if from_number == NUMERO_MANU:
+        notificar_a = NUMERO_CAMI
+        quien_registro = "Manu"
+    else:
+        notificar_a = NUMERO_MANU
+        quien_registro = "Cami"
+    
+    # Calcular cuánto debe el otro
+    pagador = datos['pagador']
+    tipo = datos['tipo']
+    monto = datos['monto']
+    
+    if tipo == "100%":
+        if pagador == quien_registro:
+            monto_deuda = 0
+        else:
+            monto_deuda = monto
+    elif tipo == "50/50":
+        monto_deuda = monto / 2
+    else:  # %
+        if pagador == "Manu":
+            monto_deuda = round(monto * 0.43, 2)
+        else:
+            monto_deuda = round(monto * 0.57, 2)
+    
+    mensaje = (
+        f"🔔 *Nuevo Gasto Registrado*\n\n"
+        f"📝 {datos['tienda']}\n"
+        f"💵 ${monto:,}\n"
+        f"📂 {datos['categoria']}\n"
+        f"💳 Pagó: {pagador}\n"
+        f"📊 División: {tipo}\n\n"
+        f"💰 Tú debes: *${monto_deuda:,.2f}*"
+    )
+    
+    send_meta_message(notificar_a, mensaje)
 
 
 @app.route("/webhook", methods=["GET", "POST"])
 def webhook():
     """Endpoint para Meta Cloud API"""
     
-    # Verificación de webhook (GET request de Meta)
     if request.method == "GET":
         mode = request.args.get("hub.mode")
         token = request.args.get("hub.verify_token")
         challenge = request.args.get("hub.challenge")
         
-        print(f"Webhook verification: mode={mode}, token={token}")
-        
         if mode == "subscribe" and token == META_VERIFY_TOKEN:
-            print("✅ Webhook verified successfully!")
             return challenge, 200
         else:
-            print("❌ Webhook verification failed!")
             return "Forbidden", 403
     
-    # Webhook de mensajes (POST)
     if request.method == "POST":
         data = request.json
-        print(f"📨 Received webhook: {json.dumps(data, indent=2)}")
         
         try:
             if data.get("object") == "whatsapp_business_account":
@@ -114,63 +202,51 @@ def webhook():
                     for change in entry.get("changes", []):
                         value = change.get("value", {})
                         
-                        # Ignorar status updates
                         if "messages" not in value:
-                            print("⏭️ Skipping - no messages in webhook")
                             continue
                         
                         for message in value.get("messages", []):
-                            # Ignorar mensajes no de texto
                             if message.get("type") != "text":
-                                print(f"⏭️ Skipping - message type: {message.get('type')}")
                                 continue
                             
                             from_number = message.get("from")
                             message_text = message.get("text", {}).get("body", "")
                             
-                            print(f"📍 Processing message from {from_number}: {message_text}")
-                            procesar_mensaje_meta(from_number, message_text)
+                            procesar_mensaje(from_number, message_text)
             
             return jsonify({"status": "ok"}), 200
         
         except Exception as e:
-            print(f"❌ ERROR processing webhook: {e}")
+            print(f"❌ ERROR: {e}")
             import traceback
             traceback.print_exc()
-            return jsonify({"status": "error", "message": str(e)}), 500
+            return jsonify({"status": "error"}), 500
 
 
-def procesar_mensaje_meta(from_number, mensaje):
-    """Procesa mensajes de Meta"""
+def procesar_mensaje(from_number, mensaje):
+    """Procesa mensajes"""
     try:
-        print(f"📍 Entered procesar_mensaje_meta for {from_number}")
-        
         if from_number in conversaciones:
-            print(f"📍 Found existing conversation")
             estado = conversaciones[from_number].get("estado")
             
-            if estado == "esperando_tipo":
-                print(f"📍 Calling manejar_tipo_division")
-                manejar_tipo_division(from_number, mensaje)
+            if estado == "esperando_categoria":
+                manejar_categoria(from_number, mensaje)
             elif estado == "esperando_pagador":
-                print(f"📍 Calling manejar_pagador")
                 manejar_pagador(from_number, mensaje)
+            elif estado == "esperando_tipo":
+                manejar_tipo_division(from_number, mensaje)
         else:
-            print(f"📍 Starting new purchase flow")
-            procesar_nueva_compra(from_number, mensaje)
-            
-        print(f"✅ Completed processing for {from_number}")
+            procesar_nuevo_gasto(from_number, mensaje)
         
     except Exception as e:
-        print(f"❌ ERROR in procesar_mensaje_meta: {e}")
+        print(f"❌ ERROR: {e}")
         import traceback
         traceback.print_exc()
 
 
-def procesar_nueva_compra(from_number, mensaje):
-    """Procesa nueva compra"""
+def procesar_nuevo_gasto(from_number, mensaje):
+    """Procesa nuevo gasto"""
     try:
-        print(f"📍 Parsing message: {mensaje}")
         pattern = r'^(.+?),\s*(\d+)$'
         match = re.match(pattern, mensaje.strip())
         
@@ -178,144 +254,184 @@ def procesar_nueva_compra(from_number, mensaje):
             tienda = match.group(1).strip()
             monto = int(match.group(2).replace(".", "").replace(",", ""))
             
-            print(f"📍 Parsed: tienda={tienda}, monto={monto}")
-            
             conversaciones[from_number] = {
                 "tienda": tienda,
                 "monto": monto,
-                "estado": "esperando_tipo",
+                "estado": "esperando_categoria",
             }
             
-            print(f"📍 Stored conversation for {from_number}")
+            # Obtener categorías
+            categorias = get_categorias()
+            categorias_texto = "\n".join([f"{i+1}️⃣ {cat}" for i, cat in enumerate(categorias)])
             
             message = (
                 f"💰 *{tienda}*\n"
                 f"💵 ${monto:,}\n\n"
-                f"¿Cómo dividimos el gasto?\n\n"
-                f"🔀 *1* → 50/50 (mitad cada uno)\n"
-                f"📊 *2* → Por % (Manu 57% / Cami 43%)\n\n"
-                f"Responde *1* o *2*"
+                f"📂 ¿En qué categoría?\n\n"
+                f"{categorias_texto}\n\n"
+                f"Responde con el *número* o *nombre*"
             )
             
-            print(f"📍 About to send message to {from_number}")
-            result = send_meta_message(from_number, message)
-            print(f"📍 Send result: {result}")
+            # Guardar categorías para referencia
+            conversaciones[from_number]['categorias'] = categorias
+            
+            send_meta_message(from_number, message)
             
         else:
-            print(f"📍 Message didn't match pattern")
             send_meta_message(
                 from_number,
                 "❌ Formato incorrecto\n\n"
-                "💡 Escribe: Tienda, Monto\n\n"
+                "💡 Escribe: *Tienda, Monto*\n\n"
                 "Ejemplos:\n• Jumbo, 18990\n• Santa Isabel, 25000"
             )
             
     except Exception as e:
-        print(f"❌ ERROR in procesar_nueva_compra: {e}")
+        print(f"❌ ERROR: {e}")
         import traceback
         traceback.print_exc()
 
 
-def manejar_tipo_division(from_number, respuesta):
-    """Maneja tipo de división"""
+def manejar_categoria(from_number, respuesta):
+    """Maneja selección de categoría"""
     try:
-        print(f"📍 manejar_tipo_division: {respuesta}")
         datos = conversaciones[from_number]
-        monto = datos["monto"]
+        categorias = datos['categorias']
         
-        if respuesta.lower() in ["1", "50/50", "50", "mitad"]:
-            tipo = "50/50"
-            manu_debe = monto / 2
-            cami_debe = monto / 2
-        elif respuesta.lower() in ["2", "%", "porcentaje", "pct"]:
-            tipo = "%"
-            manu_debe = round(monto * 0.57, 2)
-            cami_debe = round(monto * 0.43, 2)
+        # Intentar por número
+        if respuesta.isdigit():
+            idx = int(respuesta) - 1
+            if 0 <= idx < len(categorias):
+                categoria = categorias[idx]
+            else:
+                send_meta_message(from_number, "❌ Número inválido. Intenta de nuevo.")
+                return
         else:
-            send_meta_message(from_number, "❌ Opción no válida. Responde 1 o 2")
-            return
+            # Intentar por nombre
+            respuesta_lower = respuesta.lower().strip()
+            categoria = None
+            for cat in categorias:
+                if cat.lower() == respuesta_lower:
+                    categoria = cat
+                    break
+            
+            if not categoria:
+                send_meta_message(from_number, "❌ Categoría no válida. Intenta de nuevo.")
+                return
         
-        conversaciones[from_number].update({
-            "tipo": tipo,
-            "manu_debe": manu_debe,
-            "cami_debe": cami_debe,
-            "estado": "esperando_pagador",
-        })
+        # Guardar categoría
+        conversaciones[from_number]['categoria'] = categoria
+        conversaciones[from_number]['estado'] = 'esperando_pagador'
         
         message = (
-            f"✅ División {tipo}\n\n"
-            f"━━━━━━━━━━━━━━━\n"
-            f"👨 Manu: ${manu_debe:,.2f}\n"
-            f"👩 Cami: ${cami_debe:,.2f}\n"
-            f"━━━━━━━━━━━━━━━\n\n"
-            f"¿Quién pagó?\n\n"
-            f"👨 *1* → Manu\n"
-            f"👩 *2* → Cami\n\n"
+            f"✅ Categoría: *{categoria}*\n\n"
+            f"💳 ¿Quién pagó?\n\n"
+            f"1️⃣ Manu\n"
+            f"2️⃣ Cami\n\n"
             f"Responde *1* o *2*"
         )
         
         send_meta_message(from_number, message)
         
     except Exception as e:
-        print(f"❌ ERROR in manejar_tipo_division: {e}")
+        print(f"❌ ERROR: {e}")
         import traceback
         traceback.print_exc()
 
 
 def manejar_pagador(from_number, respuesta):
-    """Guarda en Sheets"""
+    """Maneja quién pagó"""
     try:
-        print(f"📍 manejar_pagador: {respuesta}")
         datos = conversaciones[from_number]
         
         if respuesta.lower() in ["1", "manu", "manuel"]:
             pagador = "Manu"
-            debe = "Cami"
-            monto_debe = datos["cami_debe"]
         elif respuesta.lower() in ["2", "cami", "camila"]:
             pagador = "Cami"
-            debe = "Manu"
-            monto_debe = datos["manu_debe"]
         else:
-            send_meta_message(from_number, "❌ Opción no válida")
+            send_meta_message(from_number, "❌ Opción no válida. Responde 1 o 2")
             return
         
-        print(f"📍 Saving to Google Sheets...")
-        sheet = get_sheet()
-        fecha = datetime.now().strftime("%d/%m/%Y %H:%M")
-        
-        fila = [
-            fecha,
-            datos["tienda"],
-            datos["monto"],
-            datos["tipo"],
-            pagador,
-            f"${datos['manu_debe']:,.2f}",
-            f"${datos['cami_debe']:,.2f}",
-            debe,
-            f"${monto_debe:,.2f}",
-        ]
-        
-        sheet.append_row(fila)
-        print(f"✅ Saved to Google Sheets")
+        conversaciones[from_number]['pagador'] = pagador
+        conversaciones[from_number]['estado'] = 'esperando_tipo'
         
         message = (
-            f"✅ *¡Registrado!*\n\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"🏪 *{datos['tienda']}*\n"
-            f"💵 Total: *${datos['monto']:,}*\n"
-            f"📊 División: *{datos['tipo']}*\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"💳 *{pagador}* pagó\n"
-            f"💰 *{debe}* debe: *${monto_debe:,.2f}*\n\n"
-            f"📝 Guardado en Sheets ✅"
+            f"✅ Pagó: *{pagador}*\n\n"
+            f"📊 ¿Cómo se divide?\n\n"
+            f"1️⃣ 100% (solo quien pagó)\n"
+            f"2️⃣ 50/50\n"
+            f"3️⃣ % (Manu 57% / Cami 43%)\n\n"
+            f"Responde *1*, *2* o *3*"
         )
         
         send_meta_message(from_number, message)
+        
+    except Exception as e:
+        print(f"❌ ERROR: {e}")
+        import traceback
+        traceback.print_exc()
+
+
+def manejar_tipo_division(from_number, respuesta):
+    """Maneja tipo de división y guarda en Sheets"""
+    try:
+        datos = conversaciones[from_number]
+        
+        if respuesta.lower() in ["1", "100", "100%"]:
+            tipo = "100%"
+        elif respuesta.lower() in ["2", "50/50", "50", "mitad"]:
+            tipo = "50/50"
+        elif respuesta.lower() in ["3", "%", "porcentaje", "pct"]:
+            tipo = "%"
+        else:
+            send_meta_message(from_number, "❌ Opción no válida. Responde 1, 2 o 3")
+            return
+        
+        # Guardar en Google Sheets
+        sheet = get_sheet()
+        
+        # Encontrar fila correcta en la categoría
+        fila = encontrar_fila_categoria(datos['categoria'])
+        
+        # Preparar datos (sin calcular H, lo hace la fórmula)
+        # Columnas: B=Categoría, C=(vacío), D=Monto, E=(vacío), F=Quién pagó, G=Tipo
+        nueva_fila = [
+            "",  # A (vacío o fecha si quieres)
+            datos['tienda'],  # B
+            "",  # C (vacío)
+            datos['monto'],  # D
+            "",  # E (vacío)
+            datos['pagador'],  # F
+            tipo,  # G
+            ""  # H (lo calcula la fórmula)
+        ]
+        
+        # Insertar fila
+        sheet.insert_row(nueva_fila, fila)
+        
+        # Notificar a la pareja
+        datos['tipo'] = tipo
+        notificar_pareja(from_number, datos)
+        
+        # Mensaje de confirmación
+        message = (
+            f"✅ *¡Registrado!*\n\n"
+            f"━━━━━━━━━━━━━━━━\n"
+            f"📝 {datos['tienda']}\n"
+            f"💵 ${datos['monto']:,}\n"
+            f"📂 {datos['categoria']}\n"
+            f"💳 Pagó: {datos['pagador']}\n"
+            f"📊 División: {tipo}\n"
+            f"━━━━━━━━━━━━━━━━\n\n"
+            f"📄 Guardado en *{SHEET_NAME}* ✅"
+        )
+        
+        send_meta_message(from_number, message)
+        
+        # Limpiar conversación
         del conversaciones[from_number]
         
     except Exception as e:
-        print(f"❌ ERROR in manejar_pagador: {e}")
+        print(f"❌ ERROR: {e}")
         import traceback
         traceback.print_exc()
         send_meta_message(from_number, f"❌ Error al guardar: {str(e)}")
@@ -324,42 +440,9 @@ def manejar_pagador(from_number, respuesta):
 @app.route("/")
 def home():
     return """
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>ATLAS Bot - Meta Cloud API</title>
-        <style>
-            body {
-                font-family: -apple-system, sans-serif;
-                max-width: 600px;
-                margin: 50px auto;
-                padding: 20px;
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                color: white;
-                text-align: center;
-            }
-            .card {
-                background: rgba(255,255,255,0.1);
-                backdrop-filter: blur(10px);
-                border-radius: 20px;
-                padding: 30px;
-            }
-            h1 { font-size: 2.5em; margin: 0; }
-            .emoji { font-size: 4em; margin: 20px 0; }
-        </style>
-    </head>
-    <body>
-        <div class="card">
-            <div class="emoji">🤖</div>
-            <h1>ATLAS Bot</h1>
-            <p>Finance Assistant con Meta Cloud API</p>
-            <div style="background: rgba(76, 175, 80, 0.3); padding: 10px 20px; border-radius: 50px; display: inline-block; margin: 20px 0;">
-                ✅ Online & Running
-            </div>
-            <p>📱 Envía un mensaje por WhatsApp</p>
-        </div>
-    </body>
-    </html>
+    <h1>🤖 ATLAS Bot - Finanzas C&M</h1>
+    <p>✅ Bot activo con Meta Cloud API</p>
+    <p>📊 Hoja actual: """ + SHEET_NAME + """</p>
     """
 
 
@@ -367,7 +450,7 @@ def home():
 def health():
     return jsonify({
         "status": "ok",
-        "provider": "meta-cloud-api",
+        "sheet": SHEET_NAME,
         "conversaciones": len(conversaciones)
     })
 
