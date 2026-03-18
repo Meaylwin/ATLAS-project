@@ -424,8 +424,7 @@ def manejar_tipo_division(from_number, respuesta):
             datos['monto'],  # D
             fecha,  # E ✅ fecha correcta
             datos['pagador'],  # F
-            tipo,  # G
-            ""  # H (fórmulas)
+            tipo  # G
         ]
         
         # 🚀 UNA sola llamada → mejora de rendimiento brutal
