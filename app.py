@@ -27,6 +27,9 @@ NUMERO_CAMI = os.getenv("NUMERO_CAMI", "")
 # Conversaciones temporales
 conversaciones = {}
 
+# Categorias
+CATEGORIAS_FIJAS = ["Hogar", "Compras", "Otros"]
+
 # Nombre de hoja: siempre usar el mes actual
 MESES_ES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", 
             "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
@@ -47,29 +50,6 @@ def get_sheet():
     client = gspread.authorize(creds)
     spreadsheet = client.open_by_key(spreadsheet_id)
     return spreadsheet.worksheet(SHEET_NAME)
-
-
-def get_categorias():
-    """Obtiene las categorías desde B7 en adelante"""
-    try:
-        sheet = get_sheet()
-        # Leer columna B desde fila 7 hasta encontrar vacío
-        categorias_raw = sheet.col_values(2)[6:]  # B7 en adelante (índice 6)
-        
-        # Filtrar solo categorías únicas y no vacías
-        categorias = []
-        for cat in categorias_raw:
-            cat = cat.strip()
-            if cat and cat not in categorias:
-                # Buscar títulos (Hogar, Compras, Otros)
-                if cat in ['Hogar', 'Compras', 'Otros']:
-                    categorias.append(cat)
-        
-        return categorias if categorias else ['Hogar', 'Compras', 'Otros']
-    except Exception as e:
-        print(f"Error obteniendo categorías: {e}")
-        return ['Hogar', 'Compras', 'Otros']
-
 
 def encontrar_ultima_fila_categoria(categoria):
     """Encuentra la última fila vacía de una categoría para agregar"""
@@ -279,7 +259,7 @@ def procesar_nuevo_gasto(from_number, mensaje):
             }
             
             # Obtener categorías
-            categorias = get_categorias()
+            categorias = CATEGORIAS_FIJAS
             categorias_texto = "\n".join([f"{i+1}️⃣ {cat}" for i, cat in enumerate(categorias)])
             
             message = (
