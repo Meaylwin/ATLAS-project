@@ -28,7 +28,7 @@ NUMERO_CAMI = os.getenv("NUMERO_CAMI", "")
 conversaciones = {}
 
 # Categorias
-CATEGORIAS_FIJAS = ["Hogar", "Compras", "Otros"]
+CATEGORIAS_FIJAS = ["Hogar", "Alimentos", "Compras", "Otros"]
 
 # Nombre de hoja: siempre usar el mes actual
 MESES_ES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", 
