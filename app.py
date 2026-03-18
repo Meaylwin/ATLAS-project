@@ -370,31 +370,46 @@ def manejar_pagador(from_number, respuesta):
 
 def copiar_formato_fila(sheet, fila_origen, fila_destino, col_end=8):
     """
-    Copia FORMATO (incluye bordes, colores, etc.) desde fila_origen -> fila_destino.
-    col_end=8 significa A:H (0..7). Si tu tabla llega más lejos, súbelo.
+    Copia FORMATO (incluye bordes/colores/etc.) desde fila_origen -> fila_destino
+    y elimina el borde superior de la fila destino.
+    col_end=8 => A:H
     """
     sheet_id = sheet._properties["sheetId"]
 
     body = {
-        "requests": [{
-            "copyPaste": {
-                "source": {
-                    "sheetId": sheet_id,
-                    "startRowIndex": fila_origen - 1,
-                    "endRowIndex": fila_origen,
-                    "startColumnIndex": 0,
-                    "endColumnIndex": col_end
-                },
-                "destination": {
-                    "sheetId": sheet_id,
-                    "startRowIndex": fila_destino - 1,
-                    "endRowIndex": fila_destino,
-                    "startColumnIndex": 0,
-                    "endColumnIndex": col_end
-                },
-                "pasteType": "PASTE_FORMAT"
+        "requests": [
+            {
+                "copyPaste": {
+                    "source": {
+                        "sheetId": sheet_id,
+                        "startRowIndex": fila_origen - 1,
+                        "endRowIndex": fila_origen,
+                        "startColumnIndex": 0,
+                        "endColumnIndex": col_end
+                    },
+                    "destination": {
+                        "sheetId": sheet_id,
+                        "startRowIndex": fila_destino - 1,
+                        "endRowIndex": fila_destino,
+                        "startColumnIndex": 0,
+                        "endColumnIndex": col_end
+                    },
+                    "pasteType": "PASTE_FORMAT"
+                }
+            },
+            {
+                "updateBorders": {
+                    "range": {
+                        "sheetId": sheet_id,
+                        "startRowIndex": fila_destino - 1,
+                        "endRowIndex": fila_destino,
+                        "startColumnIndex": 0,
+                        "endColumnIndex": col_end
+                    },
+                    "top": {"style": "NONE"}
+                }
             }
-        }]
+        ]
     }
 
     sheet.spreadsheet.batch_update(body)
@@ -417,7 +432,7 @@ def asegurar_fila_vacia_debajo(sheet, fila):
     sheet.insert_row([], fila_abajo)
        # ✅ Copia el formato desde la fila anterior (fila) a la fila insertada (fila+1)
     try:
-        copiar_formato_fila(sheet, fila_origen=fila, fila_destino=fila_abajo, col_end=8)  # A:H
+        copiar_formato_fila(sheet, fila_origen=fila, fila_destino=fila_abajo, col_end=8)
     except Exception as e:
         print("⚠️ No se pudo copiar formato:", e)
 
