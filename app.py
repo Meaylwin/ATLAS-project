@@ -369,14 +369,10 @@ def manejar_pagador(from_number, respuesta):
         traceback.print_exc()
 
 def copiar_formato_fila(sheet, fila_origen, fila_destino, col_end=8):
-    """
-    Copia FORMATO (incluye bordes/colores/etc.) desde fila_origen -> fila_destino
-    y elimina el borde superior de la fila destino.
-    col_end=8 => A:H
-    """
+    """Copia el formato de una fila y quita el borde superior de la fila destino (evita línea intermedia)."""
     sheet_id = sheet._properties["sheetId"]
 
-    body = {
+    sheet.spreadsheet.batch_update({
         "requests": [
             {
                 "copyPaste": {
@@ -385,16 +381,16 @@ def copiar_formato_fila(sheet, fila_origen, fila_destino, col_end=8):
                         "startRowIndex": fila_origen - 1,
                         "endRowIndex": fila_origen,
                         "startColumnIndex": 0,
-                        "endColumnIndex": col_end
+                        "endColumnIndex": col_end,
                     },
                     "destination": {
                         "sheetId": sheet_id,
                         "startRowIndex": fila_destino - 1,
                         "endRowIndex": fila_destino,
                         "startColumnIndex": 0,
-                        "endColumnIndex": col_end
+                        "endColumnIndex": col_end,
                     },
-                    "pasteType": "PASTE_FORMAT"
+                    "pasteType": "PASTE_FORMAT",
                 }
             },
             {
@@ -404,15 +400,13 @@ def copiar_formato_fila(sheet, fila_origen, fila_destino, col_end=8):
                         "startRowIndex": fila_destino - 1,
                         "endRowIndex": fila_destino,
                         "startColumnIndex": 0,
-                        "endColumnIndex": col_end
+                        "endColumnIndex": col_end,
                     },
-                    "top": {"style": "NONE"}
+                    "top": {"style": "NONE"},
                 }
-            }
+            },
         ]
-    }
-
-    sheet.spreadsheet.batch_update(body)
+    })
 
 def asegurar_fila_vacia_debajo(sheet, fila):
     """
