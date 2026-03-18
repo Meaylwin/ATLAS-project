@@ -388,6 +388,24 @@ def manejar_pagador(from_number, respuesta):
         import traceback
         traceback.print_exc()
 
+def asegurar_fila_vacia_debajo(sheet, fila):
+    """
+    Inserta una fila vacía en fila+1 SOLO si fila+1 no está vacía.
+    Considera "no vacía" si hay algo en columna B o C.
+    """
+    fila_abajo = fila + 1
+
+    # Leer solo B y C de la fila de abajo (barato)
+    b = sheet.acell(f"B{fila_abajo}").value or ""
+    c = sheet.acell(f"C{fila_abajo}").value or ""
+
+    if b.strip() == "" and c.strip() == "":
+        return False  # ya hay espacio
+
+    # Si hay algo (header o transacción), empuja hacia abajo
+    sheet.insert_row([], fila_abajo)
+    return True
+
 def manejar_tipo_division(from_number, respuesta):
     """Maneja tipo de división y guarda en Sheets"""
     try:
@@ -428,7 +446,9 @@ def manejar_tipo_division(from_number, respuesta):
         ]
         
         # 🚀 UNA sola llamada → mejora de rendimiento brutal
-        sheet.update(f"A{fila}:H{fila}", [nueva_fila])
+        sheet.update(f"A{fila}:G{fila}", [nueva_fila], value_input_option="USER_ENTERED")
+
+        asegurar_fila_vacia_debajo(sheet, fila)
         
         # 🔔 Notificar a la pareja
         datos['tipo'] = tipo
