@@ -474,14 +474,14 @@ def manejar_tipo_division(from_number, respuesta):
         # ✅ 1) Responder INMEDIATO al usuario (antes de Sheets)
         message = (
             f"✅ *Creada transacción*\n\n"
-            f"━━━━━━━━━━━━━━━━\n"
+            f"━━━━━━━━━━━━━━━\n"
             f"📝 {datos['tienda']}\n"
             f"💵 ${datos['monto']:,}\n"
             f"📂 {datos['categoria']}\n"
             f"💳 Pagó: {datos['pagador']}\n"
             f"📊 División: {tipo}\n"
             f"📅 Fecha: {fecha}\n"
-            f"━━━━━━━━━━━━━━━━\n\n"
+            f"━━━━━━━━━━━━━━━\n\n"
             f"📄 Se guardará en *{SHEET_NAME}*"
         )
         send_meta_message(from_number, message)
