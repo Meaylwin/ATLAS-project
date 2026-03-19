@@ -396,22 +396,23 @@ def copiar_formato_fila(sheet, fila_origen, fila_destino, col_end=8):
     })
 
 
-def asegurar_fila_vacia_debajo(sheet, fila):
+def asegurar_fila_vacia_debajo(sheet, fila, force=False):
     """
-    Inserta una fila vacía en fila+1 SOLO si fila+1 no está vacía.
-    Considera "no vacía" si hay algo en columna B o C.
+    Inserta una fila vacía en fila+1:
+    - si fila+1 no está vacía, o
+    - si force=True (útil para última sección, ej: Otros)
     """
     fila_abajo = fila + 1
 
     b = sheet.acell(f"B{fila_abajo}").value or ""
     c = sheet.acell(f"C{fila_abajo}").value or ""
 
-    if b.strip() == "" and c.strip() == "":
-        return False
+    if not force and b.strip() == "" and c.strip() == "":
+        return False  # ya hay espacio (pero puede estar sin formato)
 
     sheet.insert_row([], fila_abajo)
 
-    # ✅ Copia formato a la fila insertada
+    # Copia formato a la fila insertada (para bordes laterales + barra negra)
     try:
         copiar_formato_fila(sheet, fila_origen=fila, fila_destino=fila_abajo, col_end=8)
     except Exception as e:
@@ -436,7 +437,7 @@ def _guardar_transaccion_en_sheets(from_number, datos, tipo, fecha):
         ]
 
         sheet.update(f"A{fila}:G{fila}", [nueva_fila], value_input_option="USER_ENTERED")
-        asegurar_fila_vacia_debajo(sheet, fila)
+        asegurar_fila_vacia_debajo(sheet, fila, force=(datos["categoria"] == "Otros"))
 
         # notificar pareja sigue funcionando (en background)
         datos['tipo'] = tipo
