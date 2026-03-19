@@ -7,6 +7,7 @@ from datetime import datetime
 from google.oauth2.service_account import Credentials
 import requests
 import threading
+from zoneinfo import ZoneInfo
 
 app = Flask(__name__)
 
@@ -24,6 +25,9 @@ META_VERIFY_TOKEN = os.getenv("META_VERIFY_TOKEN")
 # Números de usuarios
 NUMERO_MANU = os.getenv("NUMERO_MANU", "56995438310")
 NUMERO_CAMI = os.getenv("NUMERO_CAMI", "")
+
+# TimeZone
+CHILE_TZ = ZoneInfo("America/Santiago")
 
 # Conversaciones temporales
 conversaciones = {}
@@ -467,10 +471,12 @@ def manejar_tipo_division(from_number, respuesta):
             send_meta_message(from_number, "❌ Opción no válida. Responde 1, 2 o 3")
             return
 
+        ahora = datetime.now(CHILE_TZ)
+
         try:
-            fecha = datetime.now().strftime("%-d/%-m/%Y")
+            fecha = ahora.strftime("%-d/%-m/%Y")
         except:
-            fecha = datetime.now().strftime("%d/%m/%Y").lstrip("0").replace("/0", "/")
+            fecha = ahora.strftime("%d/%m/%Y").lstrip("0").replace("/0", "/")
 
         # ✅ 1) Responder INMEDIATO al usuario (antes de Sheets)
         message = (
