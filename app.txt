@@ -37,7 +37,7 @@ conversaciones = {}
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1E0eBDiwr6AmnuX04K-Q_Zw7PIvlSJPnBi4Vn9ggaPlc/edit?gid=559988184"
 
 # Categorias
-CATEGORIAS_FIJAS = ["Hogar", "Alimentos", "Compras", 'Deporte, "Otros"]
+CATEGORIAS_FIJAS = ["Hogar", "Alimentos", "Compras", "Otros"]
 
 # Nombre de hoja: siempre usar el mes actual
 MESES_ES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
@@ -180,14 +180,14 @@ def notificar_pareja(from_number, datos):
 
     mensaje = (
         f"🔔 *Nuevo Gasto Registrado*\n\n"
-        f"━━━━━━━━━━━━━━\n"
+        f"━━━━━━━━━━━━━━━\n"
         f"📝 {datos['tienda']}\n"
         f"💵 ${monto:,}\n"
         f"📂 {datos['categoria']}\n"
         f"💳 Pagó: {pagador}\n"
         f"📊 División: {tipo}\n\n"
-        f"💰 Tú debes: *${monto_deuda:,.2f}*\n"
-        f"━━━━━━━━━━━━━━\n\n"
+        f"💰 Tú debes: *${monto_deuda:,.2f}*"
+        f"━━━━━━━━━━━━━━━\n\n"
         f"📄 Se guardará en *{SHEET_NAME}*\n"
         f"🔗 Ver hoja: {SHEET_URL}"
     )
@@ -503,14 +503,14 @@ def manejar_tipo_division(from_number, respuesta):
         # ✅ 1) Responder INMEDIATO al usuario (antes de Sheets)
         message = (
             f"✅ *Creada transacción*\n\n"
-            f"━━━━━━━━━━━━━━\n"
+            f"━━━━━━━━━━━━━━━\n"
             f"📝 {datos['tienda']}\n"
             f"💵 ${datos['monto']:,}\n"
             f"📂 {datos['categoria']}\n"
             f"💳 Pagó: {datos['pagador']}\n"
             f"📊 División: {tipo}\n"
             f"📅 Fecha: {fecha}\n"
-            f"━━━━━━━━━━━━━━\n\n"
+            f"━━━━━━━━━━━━━━━\n\n"
             f"📄 Se guardará en *{SHEET_NAME}*\n"
             f"🔗 Ver hoja: {SHEET_URL}"
         )
