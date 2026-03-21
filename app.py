@@ -23,8 +23,8 @@ META_PHONE_NUMBER_ID = os.getenv("META_PHONE_NUMBER_ID")
 META_VERIFY_TOKEN = os.getenv("META_VERIFY_TOKEN")
 
 # Números de usuarios
-NUMERO_MANU = os.getenv("NUMERO_MANU", "56995438310")
-NUMERO_CAMI = os.getenv("NUMERO_CAMI", "")
+NUMERO_MANU = os.getenv("NUMERO_MANU")
+NUMERO_CAMI = os.getenv("NUMERO_CAMI")
 
 # TimeZone
 CHILE_TZ = ZoneInfo("America/Santiago")
