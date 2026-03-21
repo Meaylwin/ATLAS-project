@@ -7,6 +7,7 @@ from datetime import datetime
 from google.oauth2.service_account import Credentials
 import requests
 import threading
+import re
 from zoneinfo import ZoneInfo
 
 app = Flask(__name__)
@@ -31,6 +32,9 @@ CHILE_TZ = ZoneInfo("America/Santiago")
 
 # Conversaciones temporales
 conversaciones = {}
+
+# Sheet URL
+SHEET_URL = "https://docs.google.com/spreadsheets/d/1E0eBDiwr6AmnuX04K-Q_Zw7PIvlSJPnBi4Vn9ggaPlc/edit?gid=559988184"
 
 # Categorias
 CATEGORIAS_FIJAS = ["Hogar", "Alimentos", "Compras", "Otros"]
@@ -134,17 +138,31 @@ def send_meta_message(to_number, message):
         return None
 
 
+def _norm_num(n):
+    return re.sub(r'\D', '', str(n))
+
+
 def notificar_pareja(from_number, datos):
     """Notifica a la pareja cuando alguien registra un gasto"""
-    if not NUMERO_CAMI:
+    # Verificar que tengamos los números de Manu y Cami
+    if not NUMERO_MANU or not NUMERO_CAMI:
+        print("⚠️ Notificación no enviada: NUMERO_MANU o NUMERO_CAMI no definidos.")
         return
 
-    if from_number == NUMERO_MANU:
+    # Normalizar y determinar destinatario
+    f = _norm_num(from_number)
+    m = _norm_num(NUMERO_MANU)
+    c = _norm_num(NUMERO_CAMI)
+
+    if f == m:
         notificar_a = NUMERO_CAMI
         quien_registro = "Manu"
-    else:
+    elif f == c:
         notificar_a = NUMERO_MANU
         quien_registro = "Cami"
+    else:
+        print("⚠️ Remitente no coincide con Manu ni con Cami.")
+        return
 
     pagador = datos['pagador']
     tipo = datos['tipo']
@@ -162,12 +180,16 @@ def notificar_pareja(from_number, datos):
 
     mensaje = (
         f"🔔 *Nuevo Gasto Registrado*\n\n"
+        f"━━━━━━━━━━━━━━━\n"
         f"📝 {datos['tienda']}\n"
         f"💵 ${monto:,}\n"
         f"📂 {datos['categoria']}\n"
         f"💳 Pagó: {pagador}\n"
         f"📊 División: {tipo}\n\n"
         f"💰 Tú debes: *${monto_deuda:,.2f}*"
+        f"━━━━━━━━━━━━━━━\n\n"
+        f"📄 Se guardará en *{SHEET_NAME}*\n"
+        f"🔗 Ver hoja: {SHEET_URL}"
     )
 
     send_meta_message(notificar_a, mensaje)
@@ -489,7 +511,8 @@ def manejar_tipo_division(from_number, respuesta):
             f"📊 División: {tipo}\n"
             f"📅 Fecha: {fecha}\n"
             f"━━━━━━━━━━━━━━━\n\n"
-            f"📄 Se guardará en *{SHEET_NAME}*"
+            f"📄 Se guardará en *{SHEET_NAME}*\n"
+            f"🔗 Ver hoja: {SHEET_URL}"
         )
         send_meta_message(from_number, message)
 
