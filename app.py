@@ -37,7 +37,7 @@ conversaciones = {}
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1E0eBDiwr6AmnuX04K-Q_Zw7PIvlSJPnBi4Vn9ggaPlc/edit?gid=559988184"
 
 # Categorias
-CATEGORIAS_FIJAS = ["Hogar", "Alimentos", "Compras", 'Deporte, "Otros"]
+CATEGORIAS_FIJAS = ["Hogar", "Alimentos", "Compras", "Deporte", "Otros"]
 
 # Nombre de hoja: siempre usar el mes actual
 MESES_ES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
