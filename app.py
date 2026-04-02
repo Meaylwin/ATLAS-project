@@ -347,6 +347,7 @@ def webhook_route():
             for change in entry.get("changes", []):
                 value = change.get("value", {})
 
+                # Procesar estados (entregas, envíos, etc.)
                 for status in value.get("statuses", []):
                     status_id = status.get("id")
                     status_text = status.get("status")
@@ -354,13 +355,26 @@ def webhook_route():
                     timestamp = status.get("timestamp")
                     print(f"STATUS: id={status_id} to={recipient} status={status_text} ts={timestamp}")
 
+                # Procesar mensajes entrantes
                 if "messages" in value:
                     for message in value.get("messages", []):
-                        if message.get("type") != "text":
-                            continue
                         from_number = message.get("from")
-                        message_text = message.get("text", {}).get("body", "")
-                        procesar_mensaje(from_number, message_text)
+
+                        # Mensajes de texto
+                        if message.get("type") == "text":
+                            message_text = message.get("text", {}).get("body", "")
+                            procesar_mensaje(from_number, message_text)
+
+                        # Botones interactivos (button_reply)
+                        elif message.get("type") == "interactive":
+                            interactive = message.get("interactive", {})
+                            if interactive.get("type") == "button_reply":
+                                button_id = interactive.get("button_reply", {}).get("id")
+                                # Convertimos el id a un valor que tu flujo entiende
+                                if button_id == "manu_paid":
+                                    procesar_mensaje(from_number, "1")
+                                elif button_id == "cami_paid":
+                                    procesar_mensaje(from_number, "2")
 
     return jsonify({"status": "ok"}), 200
 
