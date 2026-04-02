@@ -194,7 +194,7 @@ def enviar_template_pareja(to_number, datos, template_name="expense_notification
             {"type": "text", "text": datos.get('categoria', '')},
             {"type": "text", "text": datos.get('pagador', '')},
             {"type": "text", "text": datos.get('tipo', '')},
-            {"type": "text", "text": datos.get('monto_deuda', '')},
+            {"type": "text", "text": datos.get('texto_deuda', '')},
             {"type": "text", "text": SHEET_NAME}
         ]}
     ]
@@ -245,6 +245,18 @@ def notificar_pareja(from_number, datos):
     pagador = datos['pagador']
     tipo = datos['tipo']
     monto = datos['monto']
+    monto_deuda = datos.get("monto_deuda", 0)
+
+    # Determinar texto dinámico de deuda
+    if quien_registro == pagador:
+        # quien pagó → le deben
+        texto_deuda = f"Te deben ${monto_deuda:,}"
+    else:
+        # quien recibe → debe
+        texto_deuda = f"Tú debes ${monto_deuda:,}"
+
+    # Guardarlo para usar en template
+    datos["texto_deuda"] = texto_deuda
 
     if can_send_freeform(notificar_a):
         # Enviar mensaje de texto dentro de la ventana

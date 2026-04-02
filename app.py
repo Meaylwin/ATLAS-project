@@ -220,7 +220,10 @@ def enviar_template_pareja(to_number, datos, template_name="expense_notification
         return {"error": str(e)}
 
 def notificar_pareja(from_number, datos):
-    """Notifica a la pareja cuando alguien registra un gasto."""
+    """Notifica a la pareja cuando alguien registra un gasto.
+    Enfoque recomendado: enviar siempre por plantilla (WG) para cumplir políticas.
+    """
+
     if not NUMERO_MANU or not NUMERO_CAMI:
         print("⚠️ Notificación no enviada: NUMERO_MANU o NUMERO_CAMI no definidos.")
         return
@@ -232,11 +235,9 @@ def notificar_pareja(from_number, datos):
 
     if f == m:
         notificar_a = NUMERO_CAMI
-        quien_registro = "Manu"
         destinatario_label = "Cami"
     elif f == c:
         notificar_a = NUMERO_MANU
-        quien_registro = "Cami"
         destinatario_label = "Manu"
     else:
         print("⚠️ Remitente no coincide con Manu ni con Cami.")
@@ -247,47 +248,20 @@ def notificar_pareja(from_number, datos):
     monto = datos['monto']
     monto_deuda = datos.get("monto_deuda", 0)
 
-    # Determinar texto dinámico de deuda
-    if quien_registro == pagador:
-        # quien pagó → le deben
+    # Preparar texto de deuda (mismo formato que tenía tu código)
+    if pagador == "Manu":
         texto_deuda = f"Te deben ${monto_deuda:,}"
     else:
-        # quien recibe → debe
         texto_deuda = f"Tú debes ${monto_deuda:,}"
-
-    # Guardarlo para usar en template
     datos["texto_deuda"] = texto_deuda
 
-    if can_send_freeform(notificar_a):
-        # Enviar mensaje de texto dentro de la ventana
-        mensaje = (
-            f"🔔 *Nuevo Gasto Registrado*\n\n"
-            f"━━━━━━━━━━━━━━\n"
-            f"📝 {datos['tienda']}\n"
-            f"💵 ${monto:,}\n"
-            f"📂 {datos['categoria']}\n"
-            f"💳 Pagó: {pagador}\n"
-            f"📊 División: {tipo}\n\n"
-            f"💰 Tú debes: *${datos.get('monto_deuda', 0):,.2f}*\n"
-            f"━━━━━━━━━━━━━━\n\n"
-            f"📄 Se guardará en *{SHEET_NAME}*\n"
-            f"🔗 Ver hoja: {SHEET_URL}"
-        )
+    # Enviar siempre por plantilla (sin importar ventana 24h)
+    enviar_template_pareja(notificar_a, datos, template_name="gasto_registrado_template")
 
-        send_meta_message(notificar_a, mensaje)
-
-        # Confirmación al emisor
-        confirmacion_emisor = f"✅ Notificación enviada a {destinatario_label} (texto) dentro de la ventana de 24h."
-        send_meta_message(from_number, confirmacion_emisor)
-    else:
-        # Enviar plantillas fuera de la ventana
-        enviar_template_pareja(notificar_a, datos, template_name="gasto_registrado_template")
-
-        # Confirmación al emisor
-        confirmacion_emisor = (
-            f"✅ Notificación enviada a {destinatario_label} usando plantilla (fuera de la ventana 24h)."
-        )
-        send_meta_message(from_number, confirmacion_emisor)
+    confirmacion_emisor = (
+        f"✅ Notificación enviada a {destinatario_label} usando plantilla."
+    )
+    send_meta_message(from_number, confirmacion_emisor)
 
 def webhook():
     """Endpoint para Meta Cloud API"""
