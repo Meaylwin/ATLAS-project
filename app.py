@@ -9,6 +9,7 @@ import requests
 import threading
 import re
 from zoneinfo import ZoneInfo
+from gspread.exceptions import WorksheetNotFound
 
 app = Flask(__name__)
 
