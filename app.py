@@ -26,8 +26,12 @@ META_VERIFY_TOKEN = os.getenv("META_VERIFY_TOKEN")
 # Números de usuarios
 NUMERO_MANU = os.getenv("NUMERO_MANU")
 NUMERO_CAMI = os.getenv("NUMERO_CAMI")
-PCT_MANU = os.getenv("PCT_MANU")
-PCT_CAMI = os.getenv("PCT_CAMI")
+try:
+    PCT_MANU = float(os.getenv("PCT_MANU", "0.57"))
+    PCT_CAMI = float(os.getenv("PCT_CAMI", "0.43"))
+except Exception:
+    PCT_MANU = 0.57
+    PCT_CAMI = 0.43
 
 # TimeZone
 CHILE_TZ = ZoneInfo("America/Santiago")
@@ -191,6 +195,21 @@ def format_number_dot(n):
     except Exception:
         return str(n)
 
+def to_int(n, default=0):
+    """Convierte varias representaciones numéricas a int, sin decimales.
+    Soporta strings con separadores como "." o ",".
+    """
+    try:
+        if isinstance(n, (int, float)):
+            return int(round(n))
+        s = str(n).strip()
+        s = s.replace(" ", "")
+        s = s.replace(".", "")
+        s = s.replace(",", "")
+        return int(float(s))
+    except Exception:
+        return default
+
 def enviar_template_pareja(to_number, datos, template_name="expense_notification_v1"):
     """Envía una plantilla de WhatsApp a la pareja."""
     url = f"https://graph.facebook.com/v18.0/{META_PHONE_NUMBER_ID}/messages"
@@ -217,7 +236,7 @@ def enviar_template_pareja(to_number, datos, template_name="expense_notification
         "type": "template",
         "template": {
             "name": template_name,
-            "language": {"code": "es_CL"},  # ajusta si corresponde a tu plantilla
+            "language": {"code": "es_CL"},
             "components": components
         }
     }
@@ -257,28 +276,27 @@ def notificar_pareja(from_number, datos):
 
     pagador = datos['pagador']
     tipo = datos['tipo']
-    monto_num = datos['monto']
+    monto_num = to_int(datos['monto'], default=0)
     monto_formateado = format_number_dot(monto_num)
 
     # Calcular monto_deuda si no se ha definido explícitamente
-    monto_deuda = datos.get("monto_deuda")
-
-    if monto_deuda in (None, 0):
+    raw_monto_deuda = datos.get("monto_deuda", None)
+    if raw_monto_deuda in (None, "", 0):
         if tipo == "100%":
             monto_deuda = monto_num
         elif tipo == "50/50":
             monto_deuda = int(round(monto_num / 2.0))
         elif tipo == "%":
             if pagador == "Manu":
-                monto_deuda = int(round(monto_num * PCT_CAMI))
+                monto_deuda = to_int(monto_num * PCT_CAMI)
             elif pagador == "Cami":
-                monto_deuda = int(round(monto_num * PCT_MANU))
+                monto_deuda = to_int(monto_num * PCT_MANU)
             else:
                 monto_deuda = 0
         else:
             monto_deuda = 0
     else:
-        monto_deuda = int(round(monto_deuda))
+        monto_deuda = to_int(raw_monto_deuda, default=0)
 
     # Texto de deuda con formato "."
     texto_deuda = (
@@ -350,12 +368,13 @@ def procesar_mensaje(from_number, mensaje):
 def procesar_nuevo_gasto(from_number, mensaje):
     """Procesa nuevo gasto"""
     try:
-        pattern = r'^(.+?),\s*(\d+)$'
+        pattern = r'^(.+?),\s*([\d\.\,]+)$'
         match = re.match(pattern, mensaje.strip())
 
         if match:
             tienda = match.group(1).strip()
-            monto = int(match.group(2).replace(".", "").replace(",", ""))
+            monto_str = match.group(2).strip()
+            monto = int(monto_str.replace(".", "").replace(",", ""))
 
             conversaciones[from_number] = {
                 "tienda": tienda,
@@ -368,7 +387,7 @@ def procesar_nuevo_gasto(from_number, mensaje):
 
             message = (
                 f"💰 *{tienda}*\n"
-                f"💵 ${monto:,}\n\n"
+                f"💵 ${format_number_dot(monto)}\n\n"
                 f"📂 ¿En qué categoría?\n\n"
                 f"{categorias_texto}\n\n"
                 f"Responde con el *número* o *nombre*"
