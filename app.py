@@ -3,16 +3,12 @@ import gspread
 import os
 import re
 import json
-from datetime import datetime
 from google.oauth2.service_account import Credentials
 import requests
 import threading
-import re
-import requests
 from zoneinfo import ZoneInfo
 from gspread.exceptions import WorksheetNotFound
-from datetime import datetime, timedelta
-
+from datetime import datetime
 
 app = Flask(__name__)
 
@@ -47,7 +43,6 @@ CATEGORIAS_FIJAS = ["Hogar", "Alimentos", "Compras", "Deporte", "Otros"]
 MESES_ES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
             "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
 SHEET_NAME = f"F. {MESES_ES[datetime.now().month - 1]}"
-
 
 def get_sheet():
     """Conecta con Google Sheets y asegura que exista la hoja del mes actual.
@@ -103,7 +98,6 @@ def get_sheet():
         import traceback
         traceback.print_exc()
         raise
-
 
 def encontrar_ultima_fila_categoria(categoria):
     """Determina la próxima fila disponible para una categoría dada.
@@ -182,20 +176,52 @@ def send_meta_message(to_number, message):
         traceback.print_exc()
         return None
 
-
 def _norm_num(n):
     return re.sub(r'\D', '', str(n))
 
+# Se envia plantilla de Meta
+def enviar_template_pareja(to_number, datos, template_name="sheet_url_with_button_es_us"):
+    """Envía una plantilla de WhatsApp a la pareja (sheet_url_with_button_es_us)."""
 
-def can_send_freeform(to_number):
-    """Determina si aún estamos dentro de la ventana de 24h desde la última interacción entrante."""
-    last_inbound = LAST_INBOUND_BY_NUMBER.get(_norm_num(to_number))
-    if not last_inbound:
-        return False
-    return datetime.now(CHILE_TZ) - last_inbound <= timedelta(hours=24)
+    url = f"https://graph.facebook.com/v18.0/{META_PHONE_NUMBER_ID}/messages"
+    headers = {
+        "Authorization": f"Bearer {META_ACCESS_TOKEN}",
+        "Content-Type": "application/json"
+    }
+
+    # Ajusta estos parámetros a las placeholders reales de tu plantilla
+    components = [
+        {"type": "body", "parameters": [
+            {"type": "text", "text": datos.get('pagador', '')},   
+            {"type": "text", "text": str(datos.get('monto', ''))},
+            {"type": "text", "text": datos.get('categoria', '')},
+            {"type": "text", "text": datos.get('tienda', '')},
+            {"type": "text", "text": datos.get('tipo', '')},
+            {"type": "text", "text": str(datos.get('fecha', ''))},
+            {"type": "text", "text": SHEET_NAME}
+        ]}
+    ]
+
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": _norm_num(to_number),
+        "type": "template",
+        "template": {
+            "name": template_name,
+            "language": {"code": "es_CL"},
+            "components": components
+        }
+    }
+
+    try:
+        resp = requests.post(url, headers=headers, json=payload, timeout=30)
+        return resp.json()
+    except Exception as e:
+        print(f"❌ ERROR enviando plantilla: {e}")
+        return None
 
 def notificar_pareja(from_number, datos):
-    """Notifica a la pareja cuando alguien registra un gasto."""
+    """Notifica a la pareja usando siempre la plantilla aprobada."""
     if not NUMERO_MANU or not NUMERO_CAMI:
         print("⚠️ Notificación no enviada: NUMERO_MANU o NUMERO_CAMI no definidos.")
         return
@@ -207,53 +233,26 @@ def notificar_pareja(from_number, datos):
 
     if f == m:
         notificar_a = NUMERO_CAMI
-        quien_registro = "Manu"
         destinatario_label = "Cami"
     elif f == c:
         notificar_a = NUMERO_MANU
-        quien_registro = "Cami"
         destinatario_label = "Manu"
     else:
         print("⚠️ Remitente no coincide con Manu ni con Cami.")
         return
 
-    pagador = datos['pagador']
-    tipo = datos['tipo']
-    monto = datos['monto']
+    # Enviar siempre la plantilla aprobada
+    enviar_template_pareja(notificar_a, datos, template_name="sheet_url_with_button_es_us")
 
-    if can_send_freeform(notificar_a):
-        # Enviar mensaje de texto dentro de la ventana
-        mensaje = (
-            f"🔔 *Nuevo Gasto Registrado*\n\n"
-            f"━━━━━━━━━━━━━━\n"
-            f"📝 {datos['tienda']}\n"
-            f"💵 ${monto:,}\n"
-            f"📂 {datos['categoria']}\n"
-            f"💳 Pagó: {pagador}\n"
-            f"📊 División: {tipo}\n\n"
-            f"💰 Tú debes: *${datos.get('monto_deuda', 0):,.2f}*\n"
-            f"━━━━━━━━━━━━━━\n\n"
-            f"📄 Se guardará en *{SHEET_NAME}*\n"
-            f"🔗 Ver hoja: {SHEET_URL}"
-        )
+    # Confirmación opcional al emisor
+    send_meta_message(from_number, f"✅ Notificación enviada a {destinatario_label} mediante plantilla sheet_url_with_button_es_us.")
 
-        send_meta_message(notificar_a, mensaje)
-
-        # Confirmación al emisor
-        confirmacion_emisor = f"✅ Notificación enviada a {destinatario_label} (texto) dentro de la ventana de 24h."
-        send_meta_message(from_number, confirmacion_emisor)
-    else:
-        # Enviar plantillas fuera de la ventana
-        enviar_template_pareja(notificar_a, datos, template_name="gasto_registrado_template")
-
-        # Confirmación al emisor
-        confirmacion_emisor = (
-            f"✅ Notificación enviada a {destinatario_label} usando plantilla (fuera de la ventana 24h)."
-        )
-        send_meta_message(from_number, confirmacion_emisor)
+def webhook():
+    """Endpoint para Meta Cloud API"""
+    pass  # Este placeholder se reemplaza por la ruta real abajo
 
 @app.route("/webhook", methods=["GET", "POST"])
-def webhook():
+def webhook_route():
     """Endpoint para Meta Cloud API"""
 
     if request.method == "GET":
@@ -295,7 +294,6 @@ def webhook():
             traceback.print_exc()
             return jsonify({"status": "error"}), 500
 
-
 def procesar_mensaje(from_number, mensaje):
     """Procesa mensajes"""
     try:
@@ -315,7 +313,6 @@ def procesar_mensaje(from_number, mensaje):
         print(f"❌ ERROR: {e}")
         import traceback
         traceback.print_exc()
-
 
 def procesar_nuevo_gasto(from_number, mensaje):
     """Procesa nuevo gasto"""
@@ -416,8 +413,6 @@ def manejar_tipo_division(from_number, respuesta):
         traceback.print_exc()
         send_meta_message(from_number, f"❌ Error: {str(e)}")
 
-
-
 def manejar_categoria(from_number, respuesta):
     """Maneja selección de categoría"""
     try:
@@ -461,7 +456,6 @@ def manejar_categoria(from_number, respuesta):
         import traceback
         traceback.print_exc()
 
-
 def manejar_pagador(from_number, respuesta):
     """Maneja quién pagó"""
     try:
@@ -493,7 +487,6 @@ def manejar_pagador(from_number, respuesta):
         print(f"❌ ERROR: {e}")
         import traceback
         traceback.print_exc()
-
 
 def copiar_formato_fila(sheet, fila_origen, fila_destino, col_end=8):
     """Copia el formato de una fila y quita el borde superior de la fila destino (evita línea intermedia)."""
@@ -535,7 +528,6 @@ def copiar_formato_fila(sheet, fila_origen, fila_destino, col_end=8):
         ]
     })
 
-
 def asegurar_fila_vacia_debajo(sheet, fila, force=False):
     """
     Inserta una fila vacía en fila+1:
@@ -559,7 +551,6 @@ def asegurar_fila_vacia_debajo(sheet, fila, force=False):
         print("⚠️ No se pudo copiar formato:", e)
 
     return True
-
 
 def _guardar_transaccion_en_sheets(from_number, datos, tipo, fecha):
     try:
@@ -591,48 +582,6 @@ def _guardar_transaccion_en_sheets(from_number, datos, tipo, fecha):
         traceback.print_exc()
         send_meta_message(from_number, f"❌ Error al guardar en Google Sheets: {str(e)}")
 
-
-def enviar_template_pareja(to_number, datos, template_name="sheet_url_with_button_es_us"):
-    """Envía una plantilla de WhatsApp a la pareja (nome: sheet_url_with_button_es_us)."""
-
-    url = f"https://graph.facebook.com/v18.0/{META_PHONE_NUMBER_ID}/messages"
-    headers = {
-        "Authorization": f"Bearer {META_ACCESS_TOKEN}",
-        "Content-Type": "application/json"
-    }
-
-    # Ajusta estos parámetros a las placeholders reales de tu plantilla
-    components = [
-        {"type": "body", "parameters": [
-            {"type": "text", "text": datos.get('pagador', '')},   
-            {"type": "text", "text": str(datos.get('monto', ''))},
-            {"type": "text", "text": datos.get('categoria', '')},
-            {"type": "text", "text": datos.get('tienda', '')},
-            {"type": "text", "text": datos.get('tipo', '')},
-            {"type": "text", "text": str(datos.get('fecha', ''))},
-            {"type": "text", "text": SHEET_NAME}
-        ]}
-    ]
-
-    payload = {
-        "messaging_product": "whatsapp",
-        "to": _norm_num(to_number),
-        "type": "template",
-        "template": {
-            "name": template_name,
-            "language": {"code": "es_CL"},
-            "components": components
-        }
-    }
-
-    try:
-        resp = requests.post(url, headers=headers, json=payload, timeout=30)
-        return resp.json()
-    except Exception as e:
-        print(f"❌ ERROR enviando plantilla: {e}")
-        return None
-
-
 @app.route("/")
 def home():
     return """
@@ -641,7 +590,6 @@ def home():
     <p>📊 Hoja actual: """ + SHEET_NAME + """</p>
     """
 
-
 @app.route("/health")
 def health():
     return jsonify({
@@ -649,7 +597,6 @@ def health():
         "sheet": SHEET_NAME,
         "conversaciones": len(conversaciones)
     }), 200
-
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8080))
