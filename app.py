@@ -179,20 +179,17 @@ def send_meta_message(to_number, message):
 def _norm_num(n):
     return re.sub(r'\D', '', str(n))
 
-# Se envia plantilla de Meta
 def enviar_template_pareja(to_number, datos, template_name="sheet_url_with_button_es_us"):
-    """Envía una plantilla de WhatsApp a la pareja (sheet_url_with_button_es_us)."""
-
+    """Envía una plantilla de WhatsApp a la pareja."""
     url = f"https://graph.facebook.com/v18.0/{META_PHONE_NUMBER_ID}/messages"
     headers = {
         "Authorization": f"Bearer {META_ACCESS_TOKEN}",
         "Content-Type": "application/json"
     }
 
-    # Ajusta estos parámetros a las placeholders reales de tu plantilla
     components = [
         {"type": "body", "parameters": [
-            {"type": "text", "text": datos.get('pagador', '')},   
+            {"type": "text", "text": datos.get('pagador', '')},
             {"type": "text", "text": str(datos.get('monto', ''))},
             {"type": "text", "text": datos.get('categoria', '')},
             {"type": "text", "text": datos.get('tienda', '')},
@@ -208,25 +205,26 @@ def enviar_template_pareja(to_number, datos, template_name="sheet_url_with_butto
         "type": "template",
         "template": {
             "name": template_name,
-            "language": {"code": "es_CL"},
+            "language": {"code": "es_US"},  # ajusta si corresponde a tu plantilla
             "components": components
         }
     }
 
     try:
         resp = requests.post(url, headers=headers, json=payload, timeout=30)
-        return resp.json()
+        data = resp.json()
+        print("DEBUG: Plantilla enviada. Respuesta API:", data)  # debug
+        return data
     except Exception as e:
         print(f"❌ ERROR enviando plantilla: {e}")
-        return None
+        return {"error": str(e)}
 
 def notificar_pareja(from_number, datos):
-    """Notifica a la pareja usando siempre la plantilla aprobada."""
+    """Notifica a la pareja usando siempre la plantilla aprobada y verifica respuesta."""
     if not NUMERO_MANU or not NUMERO_CAMI:
         print("⚠️ Notificación no enviada: NUMERO_MANU o NUMERO_CAMI no definidos.")
         return
 
-    # Determina destinatario (quién debe recibir la notificación)
     f = _norm_num(from_number)
     m = _norm_num(NUMERO_MANU)
     c = _norm_num(NUMERO_CAMI)
@@ -241,58 +239,46 @@ def notificar_pareja(from_number, datos):
         print("⚠️ Remitente no coincide con Manu ni con Cami.")
         return
 
-    # Enviar siempre la plantilla aprobada
-    enviar_template_pareja(notificar_a, datos, template_name="sheet_url_with_button_es_us")
+    resp = enviar_template_pareja(notificar_a, datos, template_name="sheet_url_with_button_es_us")
 
-    # Confirmación opcional al emisor
-    send_meta_message(from_number, f"✅ Notificación enviada a {destinatario_label} mediante plantilla sheet_url_with_button_es_us.")
+    # Si hay error en la respuesta, notificar al emisor con el fallo
+    if isinstance(resp, dict) and "error" in resp:
+        err = resp.get("error")
+        print("❌ Error al enviar plantilla:", err)
+        send_meta_message(from_number, f"⚠️ No se pudo enviar la plantilla: {err}")
+    else:
+        send_meta_message(from_number, f"✅ Notificación enviada a {destinatario_label} mediante plantilla sheet_url_with_button_es_us.")
 
 def webhook():
     """Endpoint para Meta Cloud API"""
     pass  # Este placeholder se reemplaza por la ruta real abajo
 
-@app.route("/webhook", methods=["GET", "POST"])
+@app.route("/webhook", methods=["POST"])
 def webhook_route():
-    """Endpoint para Meta Cloud API"""
+    data = request.json
 
-    if request.method == "GET":
-        mode = request.args.get("hub.mode")
-        token = request.args.get("hub.verify_token")
-        challenge = request.args.get("hub.challenge")
+    if data.get("object") == "whatsapp_business_account":
+        for entry in data.get("entry", []):
+            for change in entry.get("changes", []):
+                value = change.get("value", {})
+                
+                # Registro de mensajes salientes/delivery
+                for status in value.get("statuses", []):
+                    status_id = status.get("id")
+                    status_text = status.get("status")
+                    recipient = status.get("recipient_id")
+                    timestamp = status.get("timestamp")
+                    print(f"STATUS: id={status_id} to={recipient} status={status_text} ts={timestamp}")
 
-        if mode == "subscribe" and token == META_VERIFY_TOKEN:
-            return challenge, 200
-        else:
-            return "Forbidden", 403
-
-    if request.method == "POST":
-        data = request.json
-
-        try:
-            if data.get("object") == "whatsapp_business_account":
-                for entry in data.get("entry", []):
-                    for change in entry.get("changes", []):
-                        value = change.get("value", {})
-
-                        if "messages" not in value:
+                if "messages" in value:
+                    for message in value.get("messages", []):
+                        if message.get("type") != "text":
                             continue
+                        from_number = message.get("from")
+                        message_text = message.get("text", {}).get("body", "")
+                        procesar_mensaje(from_number, message_text)
 
-                        for message in value.get("messages", []):
-                            if message.get("type") != "text":
-                                continue
-
-                            from_number = message.get("from")
-                            message_text = message.get("text", {}).get("body", "")
-
-                            procesar_mensaje(from_number, message_text)
-
-            return jsonify({"status": "ok"}), 200
-
-        except Exception as e:
-            print(f"❌ ERROR: {e}")
-            import traceback
-            traceback.print_exc()
-            return jsonify({"status": "error"}), 500
+    return jsonify({"status": "ok"}), 200
 
 def procesar_mensaje(from_number, mensaje):
     """Procesa mensajes"""
