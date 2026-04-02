@@ -26,8 +26,12 @@ META_VERIFY_TOKEN = os.getenv("META_VERIFY_TOKEN")
 # Números de usuarios
 NUMERO_MANU = os.getenv("NUMERO_MANU")
 NUMERO_CAMI = os.getenv("NUMERO_CAMI")
-PCT_MANU = os.getenv("PCT_MANU")
-PCT_CAMI = os.getenv("PCT_CAMI")
+try:
+    PCT_MANU = float(os.getenv("PCT_MANU", "0.57"))
+    PCT_CAMI = float(os.getenv("PCT_CAMI", "0.43"))
+except Exception:
+    PCT_MANU = 0.57
+    PCT_CAMI = 0.43
 
 # TimeZone
 CHILE_TZ = ZoneInfo("America/Santiago")
@@ -364,12 +368,13 @@ def procesar_mensaje(from_number, mensaje):
 def procesar_nuevo_gasto(from_number, mensaje):
     """Procesa nuevo gasto"""
     try:
-        pattern = r'^(.+?),\s*(\d+)$'
+        pattern = r'^(.+?),\s*([\d\.\,]+)$'
         match = re.match(pattern, mensaje.strip())
 
         if match:
             tienda = match.group(1).strip()
-            monto = int(match.group(2).replace(".", "").replace(",", ""))
+            monto_str = match.group(2).strip()
+            monto = int(monto_str.replace(".", "").replace(",", ""))
 
             conversaciones[from_number] = {
                 "tienda": tienda,
@@ -431,7 +436,7 @@ def manejar_tipo_division(from_number, respuesta):
             f"✅ *Creada transacción*\n\n"
             f"━━━━━━━━━━━━━━\n"
             f"📝 {datos['tienda']}\n"
-            f"💵 ${datos['monto']:,}\n"
+            f"💵 ${format_number_dot(monto)}\n\n"
             f"📂 {datos['categoria']}\n"
             f"💳 Pagó: {datos['pagador']}\n"
             f"📊 División: {tipo}\n"

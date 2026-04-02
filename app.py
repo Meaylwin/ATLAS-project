@@ -26,6 +26,8 @@ META_VERIFY_TOKEN = os.getenv("META_VERIFY_TOKEN")
 # Números de usuarios
 NUMERO_MANU = os.getenv("NUMERO_MANU")
 NUMERO_CAMI = os.getenv("NUMERO_CAMI")
+
+# Porcentajes para división %
 try:
     PCT_MANU = float(os.getenv("PCT_MANU", "0.57"))
     PCT_CAMI = float(os.getenv("PCT_CAMI", "0.43"))
@@ -42,13 +44,103 @@ conversaciones = {}
 # Sheet URL
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1E0eBDiwr6AmnuX04K-Q_Zw7PIvlSJPnBi4Vn9ggaPlc/edit?gid=559988184"
 
-# Categorias
+# Categorías
 CATEGORIAS_FIJAS = ["Hogar", "Alimentos", "Compras", "Deporte", "Otros"]
 
 # Nombre de hoja: siempre usar el mes actual
-MESES_ES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
-            "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
+MESES_ES = [
+    "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+    "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
+]
 SHEET_NAME = f"F. {MESES_ES[datetime.now().month - 1]}"
+
+
+def _norm_num(n):
+    return re.sub(r"\D", "", str(n or ""))
+
+
+def nombre_por_numero(numero):
+    n = _norm_num(numero)
+    if n == _norm_num(NUMERO_MANU):
+        return "Manu"
+    if n == _norm_num(NUMERO_CAMI):
+        return "Cami"
+    return None
+
+
+def to_int(n, default=0):
+    """Convierte varias representaciones numéricas a int, sin decimales."""
+    try:
+        if isinstance(n, (int, float)):
+            return int(round(n))
+
+        s = str(n).strip()
+        s = s.replace(" ", "")
+        s = s.replace(".", "")
+        s = s.replace(",", "")
+        return int(float(s))
+    except Exception:
+        return default
+
+
+def format_number_dot(n):
+    """Formatea con separador de miles '.' y sin decimales."""
+    try:
+        n_int = to_int(n, default=None)
+        if n_int is None:
+            return str(n)
+        return f"{n_int:,}".replace(",", ".")
+    except Exception:
+        return str(n)
+
+
+def calcular_monto_deuda(monto_num, pagador, tipo):
+    """Calcula cuánto debe la otra persona al pagador."""
+    monto_num = to_int(monto_num, default=0)
+
+    if tipo == "100%":
+        return monto_num
+
+    if tipo == "50/50":
+        return int(round(monto_num / 2.0))
+
+    if tipo == "%":
+        if pagador == "Manu":
+            return int(round(monto_num * PCT_CAMI))
+        if pagador == "Cami":
+            return int(round(monto_num * PCT_MANU))
+        return 0
+
+    return 0
+
+
+def preparar_datos_transaccion(datos, tipo):
+    """Calcula una sola vez los datos necesarios para templates/notificaciones."""
+    datos_preparados = dict(datos)
+    datos_preparados["monto"] = to_int(datos_preparados.get("monto", 0), default=0)
+    datos_preparados["tipo"] = tipo
+    datos_preparados["monto_deuda"] = calcular_monto_deuda(
+        monto_num=datos_preparados["monto"],
+        pagador=datos_preparados.get("pagador"),
+        tipo=tipo,
+    )
+    return datos_preparados
+
+
+def texto_deuda_para_destinatario(to_number, datos):
+    """Devuelve 'Te deben' o 'Tú debes' según quién recibe el mensaje."""
+    destinatario = nombre_por_numero(to_number)
+    pagador = datos.get("pagador")
+    monto_deuda = to_int(datos.get("monto_deuda", 0), default=0)
+
+    if destinatario == pagador:
+        return f"Te deben ${format_number_dot(monto_deuda)}"
+
+    if destinatario in ("Manu", "Cami"):
+        return f"Tú debes ${format_number_dot(monto_deuda)}"
+
+    return f"Saldo ${format_number_dot(monto_deuda)}"
+
 
 def get_sheet():
     """Conecta con Google Sheets y asegura que exista la hoja del mes actual.
@@ -66,16 +158,13 @@ def get_sheet():
     spreadsheet = client.open_by_key(spreadsheet_id)
 
     try:
-        # Intentar obtener la hoja del mes actual
         sheet = spreadsheet.worksheet(SHEET_NAME)
         return sheet
     except WorksheetNotFound:
-        # Si no existe, intentar crearla duplicando desde la plantilla
         try:
             template_sheet = spreadsheet.worksheet("F. Template")
-            source_sheet_id = template_sheet.id  # id de la hoja plantilla
+            source_sheet_id = template_sheet.id
 
-            # Construir petición para duplicar la hoja
             body = {
                 "requests": [
                     {
@@ -88,8 +177,6 @@ def get_sheet():
             }
 
             spreadsheet.batch_update(body)
-
-            # Intentar obtener la nueva hoja creada
             sheet = spreadsheet.worksheet(SHEET_NAME)
             print(f"✅ Hoja '{SHEET_NAME}' creada a partir de 'F. Template'.")
             return sheet
@@ -99,29 +186,23 @@ def get_sheet():
             traceback.print_exc()
             raise
     except Exception as e:
-        # Otros errores al abrir la hoja
         print(f"❌ Error al obtener la hoja: {e}")
         import traceback
         traceback.print_exc()
         raise
 
+
 def encontrar_ultima_fila_categoria(categoria):
-    """Determina la próxima fila disponible para una categoría dada.
-    Mantiene el bloque de cada categoría separado por cabeceras y evita
-    sobrescribir cabeceras de otras categorías.
-    """
+    """Determina la próxima fila disponible para una categoría dada."""
     try:
         sheet = get_sheet()
 
-        # 1) Localizar la cabecera de la categoría en la columna B
         cell = sheet.find(categoria, in_column=2)
         if not cell:
-            # Si no se encuentra la cabecera, insertamos al final de la hoja
             return len(sheet.col_values(1)) + 1
 
-        cabecera_fila = cell.row  # fila donde está la cabecera de la categoría
+        cabecera_fila = cell.row
 
-        # 2) Encontrar la próxima cabecera de cualquier categoría (si existe)
         col_b = sheet.col_values(2)
         proxima_cabecera_fila = None
         for r in range(cabecera_fila + 1, len(col_b) + 1):
@@ -130,30 +211,27 @@ def encontrar_ultima_fila_categoria(categoria):
                 proxima_cabecera_fila = r
                 break
 
-        # Si no hay próxima cabecera, trabajamos con el final de la hoja
         if not proxima_cabecera_fila:
             proxima_cabecera_fila = len(sheet.col_values(3)) + 1
 
-        # 3) Buscar la última fila con datos en la columna C (tienda) dentro este bloque
         col_c = sheet.col_values(3)
-        ultima_fila_con_datos = cabecera_fila  # al menos la cabecera existe
+        ultima_fila_con_datos = cabecera_fila
         for r in range(cabecera_fila + 1, proxima_cabecera_fila):
             valor_c = col_c[r - 1].strip() if r - 1 < len(col_c) else ""
             if valor_c:
                 ultima_fila_con_datos = r
 
-        # 4) La próxima fila libre dentro del bloque de esta categoría
         return ultima_fila_con_datos + 1
 
     except Exception as e:
         print(f"❌ ERROR al determinar fila de categoría: {e}")
         import traceback
         traceback.print_exc()
-        # Fallback conservador (en caso de fallo)
         return 31
 
+
 def send_meta_message(to_number, message):
-    """Envía mensaje con Meta Cloud API"""
+    """Envía mensaje de texto con Meta Cloud API."""
     try:
         url = f"https://graph.facebook.com/v18.0/{META_PHONE_NUMBER_ID}/messages"
 
@@ -162,7 +240,7 @@ def send_meta_message(to_number, message):
             "Content-Type": "application/json"
         }
 
-        clean_number = re.sub(r'\D', '', str(to_number))
+        clean_number = _norm_num(to_number)
 
         data = {
             "messaging_product": "whatsapp",
@@ -182,50 +260,25 @@ def send_meta_message(to_number, message):
         traceback.print_exc()
         return None
 
-def _norm_num(n):
-    return re.sub(r'\D', '', str(n))
-
-def format_number_dot(n):
-    """Formato con separador de miles '.' para mensajes FB (Ej: 1.234),
-    redondeando al entero más cercano ( CLP no admite decimales)."""
-    try:
-        n_float = float(n)
-        n_int = int(round(n_float))
-        return f"{n_int:,}".replace(",", ".")
-    except Exception:
-        return str(n)
-
-def to_int(n, default=0):
-    """Convierte varias representaciones numéricas a int, sin decimales.
-    Soporta strings con separadores como "." o ",".
-    """
-    try:
-        if isinstance(n, (int, float)):
-            return int(round(n))
-        s = str(n).strip()
-        s = s.replace(" ", "")
-        s = s.replace(".", "")
-        s = s.replace(",", "")
-        return int(float(s))
-    except Exception:
-        return default
 
 def enviar_template_pareja(to_number, datos, template_name="expense_notification_v1"):
-    """Envía una plantilla de WhatsApp a la pareja."""
+    """Envía plantilla de WhatsApp con datos del gasto al destinatario indicado."""
     url = f"https://graph.facebook.com/v18.0/{META_PHONE_NUMBER_ID}/messages"
     headers = {
         "Authorization": f"Bearer {META_ACCESS_TOKEN}",
         "Content-Type": "application/json"
     }
 
+    texto_deuda = texto_deuda_para_destinatario(to_number, datos)
+
     components = [
         {"type": "body", "parameters": [
-            {"type": "text", "text": datos.get('tienda', '')},
-            {"type": "text", "text": format_number_dot(datos.get('monto', ''))},
-            {"type": "text", "text": datos.get('categoria', '')},
-            {"type": "text", "text": datos.get('pagador', '')},
-            {"type": "text", "text": datos.get('tipo', '')},
-            {"type": "text", "text": datos.get('texto_deuda', '')},
+            {"type": "text", "text": datos.get("tienda", "")},
+            {"type": "text", "text": format_number_dot(datos.get("monto", 0))},
+            {"type": "text", "text": datos.get("categoria", "")},
+            {"type": "text", "text": datos.get("pagador", "")},
+            {"type": "text", "text": datos.get("tipo", "")},
+            {"type": "text", "text": texto_deuda},
             {"type": "text", "text": SHEET_NAME}
         ]}
     ]
@@ -248,75 +301,42 @@ def enviar_template_pareja(to_number, datos, template_name="expense_notification
         return data
     except Exception as e:
         print(f"❌ ERROR enviando plantilla: {e}")
+        import traceback
+        traceback.print_exc()
         return {"error": str(e)}
 
-def notificar_pareja(from_number, datos):
-    """Notifica a la pareja cuando alguien registra un gasto.
-    Enfoque: siempre usar plantilla (expense_notification_v1).
-    """
 
+def notificar_pareja(from_number, datos):
+    """Notifica a la pareja cuando alguien registra un gasto."""
     if not NUMERO_MANU or not NUMERO_CAMI:
         print("⚠️ Notificación no enviada: NUMERO_MANU o NUMERO_CAMI no definidos.")
         return
 
-    # Determina destinatario (quién debe recibir la notificación)
     f = _norm_num(from_number)
     m = _norm_num(NUMERO_MANU)
     c = _norm_num(NUMERO_CAMI)
 
     if f == m:
         notificar_a = NUMERO_CAMI
-        destinatario_label = "Cami"
     elif f == c:
         notificar_a = NUMERO_MANU
-        destinatario_label = "Manu"
     else:
         print("⚠️ Remitente no coincide con Manu ni con Cami.")
         return
 
-    pagador = datos['pagador']
-    tipo = datos['tipo']
-    monto_num = to_int(datos['monto'], default=0)
-    monto_formateado = format_number_dot(monto_num)
+    # Fallback de seguridad: si por alguna razón no viene preparado
+    if "tipo" not in datos or "monto_deuda" not in datos:
+        datos = preparar_datos_transaccion(datos, datos.get("tipo", ""))
 
-    # Calcular monto_deuda si no se ha definido explícitamente
-    raw_monto_deuda = datos.get("monto_deuda", None)
-    if raw_monto_deuda in (None, "", 0):
-        if tipo == "100%":
-            monto_deuda = monto_num
-        elif tipo == "50/50":
-            monto_deuda = int(round(monto_num / 2.0))
-        elif tipo == "%":
-            if pagador == "Manu":
-                monto_deuda = to_int(monto_num * PCT_CAMI)
-            elif pagador == "Cami":
-                monto_deuda = to_int(monto_num * PCT_MANU)
-            else:
-                monto_deuda = 0
-        else:
-            monto_deuda = 0
-    else:
-        monto_deuda = to_int(raw_monto_deuda, default=0)
-
-    # Texto de deuda con formato "."
-    texto_deuda = (
-        f"Te deben ${format_number_dot(monto_deuda)}"
-        if pagador == "Manu"
-        else f"Tú debes ${format_number_dot(monto_deuda)}"
-    )
-    datos["texto_deuda"] = texto_deuda
-
-    # Enviar siempre por plantilla (no ruta libre)
     enviar_template_pareja(notificar_a, datos, template_name="expense_notification_v1")
 
-    confirmacion_emisor = (
-        f"✅ Notificación enviada a {destinatario_label}"
-    )
-    send_meta_message(from_number, confirmacion_emisor)
+    # OJO: no enviamos confirmación al emisor para que el último mensaje siga siendo el template.
+
 
 def webhook():
     """Endpoint para Meta Cloud API"""
-    pass  # Este placeholder se reemplaza por la ruta real abajo
+    pass
+
 
 @app.route("/webhook", methods=["POST"])
 def webhook_route():
@@ -326,8 +346,7 @@ def webhook_route():
         for entry in data.get("entry", []):
             for change in entry.get("changes", []):
                 value = change.get("value", {})
-                
-                # Registro de mensajes salientes/delivery
+
                 for status in value.get("statuses", []):
                     status_id = status.get("id")
                     status_text = status.get("status")
@@ -345,8 +364,9 @@ def webhook_route():
 
     return jsonify({"status": "ok"}), 200
 
+
 def procesar_mensaje(from_number, mensaje):
-    """Procesa mensajes"""
+    """Procesa mensajes."""
     try:
         if from_number in conversaciones:
             estado = conversaciones[from_number].get("estado")
@@ -365,16 +385,26 @@ def procesar_mensaje(from_number, mensaje):
         import traceback
         traceback.print_exc()
 
+
 def procesar_nuevo_gasto(from_number, mensaje):
-    """Procesa nuevo gasto"""
+    """Procesa nuevo gasto."""
     try:
-        pattern = r'^(.+?),\s*([\d\.\,]+)$'
+        pattern = r'^(.+?),\s*([\d\.,]+)$'
         match = re.match(pattern, mensaje.strip())
 
         if match:
             tienda = match.group(1).strip()
             monto_str = match.group(2).strip()
-            monto = int(monto_str.replace(".", "").replace(",", ""))
+            monto = to_int(monto_str, default=-1)
+
+            if monto < 0:
+                send_meta_message(
+                    from_number,
+                    "❌ Monto inválido\n\n"
+                    "💡 Escribe: *Tienda, Monto*\n\n"
+                    "Ejemplos:\n• Jumbo, 18990\n• Jumbo, 18.990"
+                )
+                return
 
             conversaciones[from_number] = {
                 "tienda": tienda,
@@ -393,7 +423,7 @@ def procesar_nuevo_gasto(from_number, mensaje):
                 f"Responde con el *número* o *nombre*"
             )
 
-            conversaciones[from_number]['categorias'] = categorias
+            conversaciones[from_number]["categorias"] = categorias
             send_meta_message(from_number, message)
 
         else:
@@ -401,7 +431,7 @@ def procesar_nuevo_gasto(from_number, mensaje):
                 from_number,
                 "❌ Formato incorrecto\n\n"
                 "💡 Escribe: *Tienda, Monto*\n\n"
-                "Ejemplos:\n• Jumbo, 18990\n• Santa Isabel, 25000"
+                "Ejemplos:\n• Jumbo, 18990\n• Jumbo, 18.990"
             )
 
     except Exception as e:
@@ -409,8 +439,9 @@ def procesar_nuevo_gasto(from_number, mensaje):
         import traceback
         traceback.print_exc()
 
+
 def manejar_tipo_division(from_number, respuesta):
-    """Maneja tipo de división y guarda en Sheets"""
+    """Maneja tipo de división, envía template al emisor y guarda en Sheets."""
     try:
         datos = conversaciones[from_number]
 
@@ -428,35 +459,25 @@ def manejar_tipo_division(from_number, respuesta):
 
         try:
             fecha = ahora.strftime("%-d/%-m/%Y")
-        except:
+        except Exception:
             fecha = ahora.strftime("%d/%m/%Y").lstrip("0").replace("/0", "/")
 
-        # ✅ 1) Responder INMEDIATO al usuario (antes de Sheets)
-        message = (
-            f"✅ *Creada transacción*\n\n"
-            f"━━━━━━━━━━━━━━\n"
-            f"📝 {datos['tienda']}\n"
-            f"💵 ${datos['monto']:,}\n"
-            f"📂 {datos['categoria']}\n"
-            f"💳 Pagó: {datos['pagador']}\n"
-            f"📊 División: {tipo}\n"
-            f"📅 Fecha: {fecha}\n"
-            f"━━━━━━━━━━━━━━\n\n"
-            f"📄 Se guardará en *{SHEET_NAME}*\n"
-            f"🔗 Ver hoja: {SHEET_URL}"
-        )
-        send_meta_message(from_number, message)
+        # Preparar datos una sola vez
+        datos_preparados = preparar_datos_transaccion(datos, tipo)
 
-        # ✅ 2) Guardar en background (y solo avisar si falla)
-        datos_copia = dict(datos)  # evita problemas si borramos la conversación
+        # Último mensaje al emisor = template WABA
+        enviar_template_pareja(from_number, datos_preparados, template_name="expense_notification_v1")
+
+        # Guardar en background
+        datos_copia = dict(datos_preparados)
         t = threading.Thread(
             target=_guardar_transaccion_en_sheets,
-            args=(from_number, datos_copia, tipo, fecha),
+            args=(from_number, datos_copia, fecha),
             daemon=True
         )
         t.start()
 
-        # ✅ 3) Limpiar estado inmediatamente (no esperar a Sheets)
+        # Limpiar estado inmediatamente
         del conversaciones[from_number]
 
     except Exception as e:
@@ -465,11 +486,12 @@ def manejar_tipo_division(from_number, respuesta):
         traceback.print_exc()
         send_meta_message(from_number, f"❌ Error: {str(e)}")
 
+
 def manejar_categoria(from_number, respuesta):
-    """Maneja selección de categoría"""
+    """Maneja selección de categoría."""
     try:
         datos = conversaciones[from_number]
-        categorias = datos['categorias']
+        categorias = datos["categorias"]
 
         if respuesta.isdigit():
             idx = int(respuesta) - 1
@@ -490,8 +512,8 @@ def manejar_categoria(from_number, respuesta):
                 send_meta_message(from_number, "❌ Categoría no válida. Intenta de nuevo.")
                 return
 
-        conversaciones[from_number]['categoria'] = categoria
-        conversaciones[from_number]['estado'] = 'esperando_pagador'
+        conversaciones[from_number]["categoria"] = categoria
+        conversaciones[from_number]["estado"] = "esperando_pagador"
 
         message = (
             f"✅ Categoría: *{categoria}*\n\n"
@@ -508,11 +530,10 @@ def manejar_categoria(from_number, respuesta):
         import traceback
         traceback.print_exc()
 
-def manejar_pagador(from_number, respuesta):
-    """Maneja quién pagó"""
-    try:
-        datos = conversaciones[from_number]
 
+def manejar_pagador(from_number, respuesta):
+    """Maneja quién pagó."""
+    try:
         if respuesta.lower() in ["1", "manu", "manuel"]:
             pagador = "Manu"
         elif respuesta.lower() in ["2", "cami", "camila"]:
@@ -521,8 +542,8 @@ def manejar_pagador(from_number, respuesta):
             send_meta_message(from_number, "❌ Opción no válida. Responde 1 o 2")
             return
 
-        conversaciones[from_number]['pagador'] = pagador
-        conversaciones[from_number]['estado'] = 'esperando_tipo'
+        conversaciones[from_number]["pagador"] = pagador
+        conversaciones[from_number]["estado"] = "esperando_tipo"
 
         message = (
             f"✅ Pagó: *{pagador}*\n\n"
@@ -540,8 +561,9 @@ def manejar_pagador(from_number, respuesta):
         import traceback
         traceback.print_exc()
 
+
 def copiar_formato_fila(sheet, fila_origen, fila_destino, col_end=8):
-    """Copia el formato de una fila y quita el borde superior de la fila destino (evita línea intermedia)."""
+    """Copia el formato de una fila y quita el borde superior de la fila destino."""
     sheet_id = sheet._properties["sheetId"]
 
     sheet.spreadsheet.batch_update({
@@ -580,11 +602,12 @@ def copiar_formato_fila(sheet, fila_origen, fila_destino, col_end=8):
         ]
     })
 
+
 def asegurar_fila_vacia_debajo(sheet, fila, force=False):
     """
     Inserta una fila vacía en fila+1:
     - si fila+1 no está vacía, o
-    - si force=True (útil para última sección, ej: Otros)
+    - si force=True
     """
     fila_abajo = fila + 1
 
@@ -592,11 +615,10 @@ def asegurar_fila_vacia_debajo(sheet, fila, force=False):
     c = sheet.acell(f"C{fila_abajo}").value or ""
 
     if not force and b.strip() == "" and c.strip() == "":
-        return False  # ya hay espacio (pero puede estar sin formato)
+        return False
 
     sheet.insert_row([], fila_abajo)
 
-    # Copia formato a la fila insertada (para bordes laterales + barra negra)
     try:
         copiar_formato_fila(sheet, fila_origen=fila, fila_destino=fila_abajo, col_end=8)
     except Exception as e:
@@ -604,29 +626,27 @@ def asegurar_fila_vacia_debajo(sheet, fila, force=False):
 
     return True
 
-def _guardar_transaccion_en_sheets(from_number, datos, tipo, fecha):
+
+def _guardar_transaccion_en_sheets(from_number, datos, fecha):
     try:
         sheet = get_sheet()
-        fila = encontrar_ultima_fila_categoria(datos['categoria'])
+        fila = encontrar_ultima_fila_categoria(datos["categoria"])
 
         nueva_fila = [
-            "",               # A
-            "",               # B
-            datos['tienda'],  # C
-            datos['monto'],   # D
-            fecha,            # E
-            datos['pagador'], # F
-            tipo              # G
+            "",                    # A
+            "",                    # B
+            datos["tienda"],       # C
+            datos["monto"],        # D
+            fecha,                 # E
+            datos["pagador"],      # F
+            datos["tipo"]          # G
         ]
 
         sheet.update(f"A{fila}:G{fila}", [nueva_fila], value_input_option="USER_ENTERED")
         asegurar_fila_vacia_debajo(sheet, fila, force=(datos["categoria"] == "Otros"))
 
-        # notificar pareja sigue funcionando (en background)
-        datos['tipo'] = tipo
+        # Notificar a la pareja solo si Sheets guardó OK
         notificar_pareja(from_number, datos)
-
-        # ✅ No enviar nada si salió OK
 
     except Exception as e:
         print(f"❌ ERROR guardando en Sheets: {e}")
@@ -634,13 +654,15 @@ def _guardar_transaccion_en_sheets(from_number, datos, tipo, fecha):
         traceback.print_exc()
         send_meta_message(from_number, f"❌ Error al guardar en Google Sheets: {str(e)}")
 
+
 @app.route("/")
 def home():
-    return """
+    return f"""
     <h1>🤖 ATLAS Bot - Finanzas C&M</h1>
     <p>✅ Bot activo con Meta Cloud API</p>
-    <p>📊 Hoja actual: """ + SHEET_NAME + """</p>
+    <p>📊 Hoja actual: {SHEET_NAME}</p>
     """
+
 
 @app.route("/health")
 def health():
@@ -649,6 +671,7 @@ def health():
         "sheet": SHEET_NAME,
         "conversaciones": len(conversaciones)
     }), 200
+
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8080))
