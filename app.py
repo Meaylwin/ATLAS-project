@@ -488,7 +488,7 @@ def manejar_tipo_division(from_number, respuesta):
 
 
 def manejar_categoria(from_number, respuesta):
-    """Maneja selección de categoría."""
+    """Maneja selección de categoría con botones interactivos."""
     try:
         datos = conversaciones[from_number]
         categorias = datos["categorias"]
@@ -507,7 +507,6 @@ def manejar_categoria(from_number, respuesta):
                 if cat.lower() == respuesta_lower:
                     categoria = cat
                     break
-
             if not categoria:
                 send_meta_message(from_number, "❌ Categoría no válida. Intenta de nuevo.")
                 return
@@ -515,15 +514,31 @@ def manejar_categoria(from_number, respuesta):
         conversaciones[from_number]["categoria"] = categoria
         conversaciones[from_number]["estado"] = "esperando_pagador"
 
-        message = (
-            f"✅ Categoría: *{categoria}*\n\n"
-            f"💳 ¿Quién pagó?\n\n"
-            f"1️⃣ Manu\n"
-            f"2️⃣ Cami\n\n"
-            f"Responde *1* o *2*"
-        )
+        # --- send_meta_message con botón interactivo ---
+        interactive_payload = {
+            "messaging_product": "whatsapp",
+            "to": _norm_num(from_number),
+            "type": "interactive",
+            "interactive": {
+                "type": "button",
+                "body": {
+                    "text": f"✅ Categoría: {categoria}\n💳 ¿Quién pagó?"
+                },
+                "action": {
+                    "buttons": [
+                        {"type": "reply", "reply": {"id": "manu_paid", "title": "1️⃣ Manu"}},
+                        {"type": "reply", "reply": {"id": "cami_paid", "title": "2️⃣ Cami"}}
+                    ]
+                }
+            }
+        }
 
-        send_meta_message(from_number, message)
+        url = f"https://graph.facebook.com/v18.0/{META_PHONE_NUMBER_ID}/messages"
+        headers = {
+            "Authorization": f"Bearer {META_ACCESS_TOKEN}",
+            "Content-Type": "application/json"
+        }
+        requests.post(url, headers=headers, json=interactive_payload, timeout=30)
 
     except Exception as e:
         print(f"❌ ERROR: {e}")
