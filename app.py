@@ -26,6 +26,8 @@ META_VERIFY_TOKEN = os.getenv("META_VERIFY_TOKEN")
 # Números de usuarios
 NUMERO_MANU = os.getenv("NUMERO_MANU")
 NUMERO_CAMI = os.getenv("NUMERO_CAMI")
+PCT_MANU = os.getenv("PCT_MANU")
+PCT_CAMI = os.getenv("PCT_CAMI")
 
 # TimeZone
 CHILE_TZ = ZoneInfo("America/Santiago")
@@ -180,9 +182,11 @@ def _norm_num(n):
     return re.sub(r'\D', '', str(n))
 
 def format_number_dot(n):
-    """Formato con separador de miles '.' para mensajes FB (Ej: 1.234)."""
+    """Formato con separador de miles '.' para mensajes FB (Ej: 1.234),
+    redondeando al entero más cercano ( CLP no admite decimales)."""
     try:
-        n_int = int(n)
+        n_float = float(n)
+        n_int = int(round(n_float))
         return f"{n_int:,}".replace(",", ".")
     except Exception:
         return str(n)
@@ -253,10 +257,30 @@ def notificar_pareja(from_number, datos):
 
     pagador = datos['pagador']
     tipo = datos['tipo']
-    monto = monto_formateado = format_number_dot(datos['monto'])
-    monto_deuda = datos.get("monto_deuda", 0)
+    monto_num = datos['monto']
+    monto_formateado = format_number_dot(monto_num)
 
-    # Texto de deuda (usa el formato existente)
+    # Calcular monto_deuda si no se ha definido explícitamente
+    monto_deuda = datos.get("monto_deuda")
+
+    if monto_deuda in (None, 0):
+        if tipo == "100%":
+            monto_deuda = monto_num
+        elif tipo == "50/50":
+            monto_deuda = int(round(monto_num / 2.0))
+        elif tipo == "%":
+            if pagador == "Manu":
+                monto_deuda = int(round(monto_num * PCT_CAMI))
+            elif pagador == "Cami":
+                monto_deuda = int(round(monto_num * PCT_MANU))
+            else:
+                monto_deuda = 0
+        else:
+            monto_deuda = 0
+    else:
+        monto_deuda = int(round(monto_deuda))
+
+    # Texto de deuda con formato "."
     texto_deuda = (
         f"Te deben ${format_number_dot(monto_deuda)}"
         if pagador == "Manu"
