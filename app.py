@@ -205,7 +205,7 @@ def enviar_template_pareja(to_number, datos, template_name="sheet_url_with_butto
         "type": "template",
         "template": {
             "name": template_name,
-            "language": {"code": "es_US"},  # ajusta si corresponde a tu plantilla
+            "language": {"code": "es_CL"},  # ajusta si corresponde a tu plantilla
             "components": components
         }
     }
