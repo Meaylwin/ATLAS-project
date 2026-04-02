@@ -95,21 +95,22 @@ def format_number_dot(n):
 
 
 def calcular_monto_deuda(monto_num, pagador, tipo):
-    """Calcula cuánto debe la otra persona al pagador, corrigiendo impares en 50/50."""
+    """Calcula cuánto debe la otra persona al pagador."""
     monto_num = to_int(monto_num, default=0)
-    
+
     if tipo == "100%":
         return monto_num
-    elif tipo == "50/50":
-        mitad = monto_num // 2
-        # Si es impar, que la otra persona pague el menor y el pagador se queda con el resto
-        return mitad
-    elif tipo == "%":
+
+    if tipo == "50/50":
+        return monto_num // 2
+
+    if tipo == "%":
         if pagador == "Manu":
             return int(round(monto_num * PCT_CAMI))
         if pagador == "Cami":
             return int(round(monto_num * PCT_MANU))
         return 0
+
     return 0
 
 
@@ -139,6 +140,206 @@ def texto_deuda_para_destinatario(to_number, datos):
         return f"Tú debes ${format_number_dot(monto_deuda)}"
 
     return f"Saldo ${format_number_dot(monto_deuda)}"
+
+
+def send_meta_message(to_number, message):
+    """Envía mensaje de texto con Meta Cloud API."""
+    try:
+        url = f"https://graph.facebook.com/v18.0/{META_PHONE_NUMBER_ID}/messages"
+
+        headers = {
+            "Authorization": f"Bearer {META_ACCESS_TOKEN}",
+            "Content-Type": "application/json"
+        }
+
+        clean_number = _norm_num(to_number)
+
+        data = {
+            "messaging_product": "whatsapp",
+            "to": clean_number,
+            "type": "text",
+            "text": {
+                "body": message
+            }
+        }
+
+        response = requests.post(url, headers=headers, json=data, timeout=30)
+        return response.json()
+
+    except Exception as e:
+        print(f"❌ ERROR sending message: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+
+def enviar_lista_categorias(from_number, tienda, monto):
+    """Envía una lista interactiva de categorías."""
+    try:
+        rows = [
+            {"id": "cat_Hogar", "title": "Hogar"},
+            {"id": "cat_Alimentos", "title": "Alimentos"},
+            {"id": "cat_Compras", "title": "Compras"},
+            {"id": "cat_Deporte", "title": "Deporte"},
+            {"id": "cat_Otros", "title": "Otros"},
+        ]
+
+        interactive_payload = {
+            "messaging_product": "whatsapp",
+            "to": _norm_num(from_number),
+            "type": "interactive",
+            "interactive": {
+                "type": "list",
+                "body": {
+                    "text": (
+                        f"💰 {tienda}\n"
+                        f"💵 ${format_number_dot(monto)}\n\n"
+                        f"📂 ¿En qué categoría?"
+                    )
+                },
+                "action": {
+                    "button": "Elegir categoría",
+                    "sections": [
+                        {
+                            "title": "Categorías",
+                            "rows": rows
+                        }
+                    ]
+                }
+            }
+        }
+
+        url = f"https://graph.facebook.com/v18.0/{META_PHONE_NUMBER_ID}/messages"
+        headers = {
+            "Authorization": f"Bearer {META_ACCESS_TOKEN}",
+            "Content-Type": "application/json"
+        }
+
+        resp = requests.post(url, headers=headers, json=interactive_payload, timeout=30)
+        print("DEBUG lista categorías:", resp.json())
+
+    except Exception as e:
+        print(f"❌ ERROR enviando lista de categorías: {e}")
+        import traceback
+        traceback.print_exc()
+
+
+def enviar_botones_pagador(from_number, categoria):
+    """Envía botones interactivos para elegir quién pagó."""
+    try:
+        interactive_payload = {
+            "messaging_product": "whatsapp",
+            "to": _norm_num(from_number),
+            "type": "interactive",
+            "interactive": {
+                "type": "button",
+                "body": {
+                    "text": f"✅ Categoría: {categoria}\n💳 ¿Quién pagó?"
+                },
+                "action": {
+                    "buttons": [
+                        {"type": "reply", "reply": {"id": "manu_paid", "title": "Manu"}},
+                        {"type": "reply", "reply": {"id": "cami_paid", "title": "Cami"}}
+                    ]
+                }
+            }
+        }
+
+        url = f"https://graph.facebook.com/v18.0/{META_PHONE_NUMBER_ID}/messages"
+        headers = {
+            "Authorization": f"Bearer {META_ACCESS_TOKEN}",
+            "Content-Type": "application/json"
+        }
+
+        resp = requests.post(url, headers=headers, json=interactive_payload, timeout=30)
+        print("DEBUG botones pagador:", resp.json())
+
+    except Exception as e:
+        print(f"❌ ERROR enviando botones de pagador: {e}")
+        import traceback
+        traceback.print_exc()
+
+
+def enviar_tipo_division(from_number):
+    """Envía botones interactivos para elegir tipo de división."""
+    try:
+        interactive_payload = {
+            "messaging_product": "whatsapp",
+            "to": _norm_num(from_number),
+            "type": "interactive",
+            "interactive": {
+                "type": "button",
+                "body": {
+                    "text": "📊 ¿Cómo se divide el gasto?"
+                },
+                "action": {
+                    "buttons": [
+                        {"type": "reply", "reply": {"id": "tipo_100", "title": "100%"}},
+                        {"type": "reply", "reply": {"id": "tipo_50", "title": "50/50"}},
+                        {"type": "reply", "reply": {"id": "tipo_pct", "title": "57/43 %"}}
+                    ]
+                }
+            }
+        }
+
+        url = f"https://graph.facebook.com/v18.0/{META_PHONE_NUMBER_ID}/messages"
+        headers = {
+            "Authorization": f"Bearer {META_ACCESS_TOKEN}",
+            "Content-Type": "application/json"
+        }
+
+        resp = requests.post(url, headers=headers, json=interactive_payload, timeout=30)
+        print("DEBUG tipo división:", resp.json())
+
+    except Exception as e:
+        print(f"❌ ERROR enviando tipo de división: {e}")
+        import traceback
+        traceback.print_exc()
+
+
+def enviar_template_pareja(to_number, datos, template_name="expense_notification_v1"):
+    """Envía plantilla de WhatsApp con datos del gasto al destinatario indicado."""
+    url = f"https://graph.facebook.com/v18.0/{META_PHONE_NUMBER_ID}/messages"
+    headers = {
+        "Authorization": f"Bearer {META_ACCESS_TOKEN}",
+        "Content-Type": "application/json"
+    }
+
+    texto_deuda = texto_deuda_para_destinatario(to_number, datos)
+
+    components = [
+        {"type": "body", "parameters": [
+            {"type": "text", "text": datos.get("tienda", "")},
+            {"type": "text", "text": format_number_dot(datos.get("monto", 0))},
+            {"type": "text", "text": datos.get("categoria", "")},
+            {"type": "text", "text": datos.get("pagador", "")},
+            {"type": "text", "text": datos.get("tipo", "")},
+            {"type": "text", "text": texto_deuda},
+            {"type": "text", "text": SHEET_NAME}
+        ]}
+    ]
+
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": _norm_num(to_number),
+        "type": "template",
+        "template": {
+            "name": template_name,
+            "language": {"code": "es_CL"},
+            "components": components
+        }
+    }
+
+    try:
+        resp = requests.post(url, headers=headers, json=payload, timeout=30)
+        data = resp.json()
+        print("DEBUG: Plantilla enviada. Respuesta API:", data)
+        return data
+    except Exception as e:
+        print(f"❌ ERROR enviando plantilla: {e}")
+        import traceback
+        traceback.print_exc()
+        return {"error": str(e)}
 
 
 def get_sheet():
@@ -229,159 +430,6 @@ def encontrar_ultima_fila_categoria(categoria):
         return 31
 
 
-def send_meta_message(to_number, message):
-    """Envía mensaje de texto con Meta Cloud API."""
-    try:
-        url = f"https://graph.facebook.com/v18.0/{META_PHONE_NUMBER_ID}/messages"
-
-        headers = {
-            "Authorization": f"Bearer {META_ACCESS_TOKEN}",
-            "Content-Type": "application/json"
-        }
-
-        clean_number = _norm_num(to_number)
-
-        data = {
-            "messaging_product": "whatsapp",
-            "to": clean_number,
-            "type": "text",
-            "text": {
-                "body": message
-            }
-        }
-
-        response = requests.post(url, headers=headers, json=data, timeout=30)
-        return response.json()
-
-    except Exception as e:
-        print(f"❌ ERROR sending message: {e}")
-        import traceback
-        traceback.print_exc()
-        return None
-
-def manejar_categoria(from_number, respuesta):
-    """Maneja selección de categoría con botones interactivos únicamente."""
-    try:
-        datos = conversaciones[from_number]
-        categorias = datos["categorias"]
-
-        # Convertimos la respuesta a categoría según botón (el payload del botón ya tiene el nombre)
-        categoria = respuesta.strip()
-        if categoria not in categorias:
-            send_meta_message(from_number, "❌ Categoría no válida. Intenta de nuevo usando los botones.")
-            return
-
-        conversaciones[from_number]["categoria"] = categoria
-        conversaciones[from_number]["estado"] = "esperando_pagador"
-
-        # --- Enviar botón de selección de pagador ---
-        interactive_payload = {
-            "messaging_product": "whatsapp",
-            "to": _norm_num(from_number),
-            "type": "interactive",
-            "interactive": {
-                "type": "button",
-                "body": {"text": f"✅ Categoría: {categoria}\n💳 ¿Quién pagó?"},
-                "action": {
-                    "buttons": [
-                        {"type": "reply", "reply": {"id": "manu_paid", "title": "Manu"}},
-                        {"type": "reply", "reply": {"id": "cami_paid", "title": "Cami"}}
-                    ]
-                }
-            }
-        }
-
-        url = f"https://graph.facebook.com/v18.0/{META_PHONE_NUMBER_ID}/messages"
-        headers = {
-            "Authorization": f"Bearer {META_ACCESS_TOKEN}",
-            "Content-Type": "application/json"
-        }
-        requests.post(url, headers=headers, json=interactive_payload, timeout=30)
-
-    except Exception as e:
-        print(f"❌ ERROR: {e}")
-        import traceback
-        traceback.print_exc()
-
-def enviar_tipo_division(from_number):
-    """Envía botones interactivos para que el usuario elija tipo de división."""
-    try:
-        interactive_payload = {
-            "messaging_product": "whatsapp",
-            "to": _norm_num(from_number),
-            "type": "interactive",
-            "interactive": {
-                "type": "button",
-                "body": {
-                    "text": "📊 ¿Cómo se divide el gasto?"
-                },
-                "action": {
-                    "buttons": [
-                        {"type": "reply", "reply": {"id": "tipo_100", "title": "100% (debe pagar el otro)"}},
-                        {"type": "reply", "reply": {"id": "tipo_50", "title": "50/50"}},
-                        {"type": "reply", "reply": {"id": "tipo_pct", "title": "57/43 %"}}
-                    ]
-                }
-            }
-        }
-
-        url = f"https://graph.facebook.com/v18.0/{META_PHONE_NUMBER_ID}/messages"
-        headers = {
-            "Authorization": f"Bearer {META_ACCESS_TOKEN}",
-            "Content-Type": "application/json"
-        }
-        requests.post(url, headers=headers, json=interactive_payload, timeout=30)
-
-    except Exception as e:
-        print(f"❌ ERROR enviando tipo de división: {e}")
-        import traceback
-        traceback.print_exc()
-
-def enviar_template_pareja(to_number, datos, template_name="expense_notification_v1"):
-    """Envía plantilla de WhatsApp con datos del gasto al destinatario indicado."""
-    url = f"https://graph.facebook.com/v18.0/{META_PHONE_NUMBER_ID}/messages"
-    headers = {
-        "Authorization": f"Bearer {META_ACCESS_TOKEN}",
-        "Content-Type": "application/json"
-    }
-
-    texto_deuda = texto_deuda_para_destinatario(to_number, datos)
-
-    components = [
-        {"type": "body", "parameters": [
-            {"type": "text", "text": datos.get("tienda", "")},
-            {"type": "text", "text": format_number_dot(datos.get("monto", 0))},
-            {"type": "text", "text": datos.get("categoria", "")},
-            {"type": "text", "text": datos.get("pagador", "")},
-            {"type": "text", "text": datos.get("tipo", "")},
-            {"type": "text", "text": texto_deuda},
-            {"type": "text", "text": SHEET_NAME}
-        ]}
-    ]
-
-    payload = {
-        "messaging_product": "whatsapp",
-        "to": _norm_num(to_number),
-        "type": "template",
-        "template": {
-            "name": template_name,
-            "language": {"code": "es_CL"},
-            "components": components
-        }
-    }
-
-    try:
-        resp = requests.post(url, headers=headers, json=payload, timeout=30)
-        data = resp.json()
-        print("DEBUG: Plantilla enviada. Respuesta API:", data)
-        return data
-    except Exception as e:
-        print(f"❌ ERROR enviando plantilla: {e}")
-        import traceback
-        traceback.print_exc()
-        return {"error": str(e)}
-
-
 def notificar_pareja(from_number, datos):
     """Notifica a la pareja cuando alguien registra un gasto."""
     if not NUMERO_MANU or not NUMERO_CAMI:
@@ -400,13 +448,10 @@ def notificar_pareja(from_number, datos):
         print("⚠️ Remitente no coincide con Manu ni con Cami.")
         return
 
-    # Fallback de seguridad: si por alguna razón no viene preparado
     if "tipo" not in datos or "monto_deuda" not in datos:
         datos = preparar_datos_transaccion(datos, datos.get("tipo", ""))
 
     enviar_template_pareja(notificar_a, datos, template_name="expense_notification_v1")
-
-    # OJO: no enviamos confirmación al emisor para que el último mensaje siga siendo el template.
 
 
 def webhook():
@@ -423,7 +468,7 @@ def webhook_route():
             for change in entry.get("changes", []):
                 value = change.get("value", {})
 
-                # Procesar estados (entregas, envíos, etc.)
+                # Status updates
                 for status in value.get("statuses", []):
                     status_id = status.get("id")
                     status_text = status.get("status")
@@ -431,36 +476,52 @@ def webhook_route():
                     timestamp = status.get("timestamp")
                     print(f"STATUS: id={status_id} to={recipient} status={status_text} ts={timestamp}")
 
-                # Procesar mensajes entrantes
+                # Mensajes entrantes
                 for message in value.get("messages", []):
                     from_number = message.get("from")
 
-                    # Mensajes de texto
                     if message.get("type") == "text":
                         message_text = message.get("text", {}).get("body", "")
                         procesar_mensaje(from_number, message_text)
 
-                    # Botones interactivos
                     elif message.get("type") == "interactive":
                         interactive = message.get("interactive", {})
-                        if interactive.get("type") == "button_reply":
+
+                        # Lista de categorías
+                        if interactive.get("type") == "list_reply":
+                            list_id = interactive.get("list_reply", {}).get("id")
+
+                            mapping_categorias = {
+                                "cat_Hogar": "Hogar",
+                                "cat_Alimentos": "Alimentos",
+                                "cat_Compras": "Compras",
+                                "cat_Deporte": "Deporte",
+                                "cat_Otros": "Otros",
+                            }
+
+                            if list_id in mapping_categorias:
+                                procesar_mensaje(from_number, mapping_categorias[list_id])
+
+                        # Botones
+                        elif interactive.get("type") == "button_reply":
                             button_id = interactive.get("button_reply", {}).get("id")
 
-                            # Pagador
                             if button_id == "manu_paid":
                                 procesar_mensaje(from_number, "Manu")
-                                enviar_tipo_division(from_number)
+
                             elif button_id == "cami_paid":
                                 procesar_mensaje(from_number, "Cami")
-                                enviar_tipo_division(from_number)
 
-                            # Tipo de división
                             elif button_id in ["tipo_100", "tipo_50", "tipo_pct"]:
-                                # Convertimos el botón en la respuesta que entiende manejar_tipo_division
-                                mapping = {"tipo_100": "1", "tipo_50": "2", "tipo_pct": "3"}
-                                procesar_mensaje(from_number, mapping[button_id])
+                                mapping_tipos = {
+                                    "tipo_100": "1",
+                                    "tipo_50": "2",
+                                    "tipo_pct": "3",
+                                }
+                                procesar_mensaje(from_number, mapping_tipos[button_id])
 
     return jsonify({"status": "ok"}), 200
+
 
 def procesar_mensaje(from_number, mensaje):
     """Procesa mensajes."""
@@ -507,21 +568,10 @@ def procesar_nuevo_gasto(from_number, mensaje):
                 "tienda": tienda,
                 "monto": monto,
                 "estado": "esperando_categoria",
+                "categorias": CATEGORIAS_FIJAS,
             }
 
-            categorias = CATEGORIAS_FIJAS
-            categorias_texto = "\n".join([f"{i+1}️⃣ {cat}" for i, cat in enumerate(categorias)])
-
-            message = (
-                f"💰 *{tienda}*\n"
-                f"💵 ${format_number_dot(monto)}\n\n"
-                f"📂 ¿En qué categoría?\n\n"
-                f"{categorias_texto}\n\n"
-                f"Responde con el *número* o *nombre*"
-            )
-
-            conversaciones[from_number]["categorias"] = categorias
-            send_meta_message(from_number, message)
+            enviar_lista_categorias(from_number, tienda, monto)
 
         else:
             send_meta_message(
@@ -530,6 +580,50 @@ def procesar_nuevo_gasto(from_number, mensaje):
                 "💡 Escribe: *Tienda, Monto*\n\n"
                 "Ejemplos:\n• Jumbo, 18990\n• Jumbo, 18.990"
             )
+
+    except Exception as e:
+        print(f"❌ ERROR: {e}")
+        import traceback
+        traceback.print_exc()
+
+
+def manejar_categoria(from_number, respuesta):
+    """Maneja selección de categoría desde lista interactiva."""
+    try:
+        datos = conversaciones[from_number]
+        categorias = datos["categorias"]
+
+        categoria = respuesta.strip()
+        if categoria not in categorias:
+            send_meta_message(from_number, "❌ Categoría no válida. Intenta de nuevo usando la lista.")
+            return
+
+        conversaciones[from_number]["categoria"] = categoria
+        conversaciones[from_number]["estado"] = "esperando_pagador"
+
+        enviar_botones_pagador(from_number, categoria)
+
+    except Exception as e:
+        print(f"❌ ERROR: {e}")
+        import traceback
+        traceback.print_exc()
+
+
+def manejar_pagador(from_number, respuesta):
+    """Maneja quién pagó."""
+    try:
+        if respuesta.lower() in ["1", "manu", "manuel"]:
+            pagador = "Manu"
+        elif respuesta.lower() in ["2", "cami", "camila"]:
+            pagador = "Cami"
+        else:
+            send_meta_message(from_number, "❌ Opción no válida. Responde 1 o 2")
+            return
+
+        conversaciones[from_number]["pagador"] = pagador
+        conversaciones[from_number]["estado"] = "esperando_tipo"
+
+        enviar_tipo_division(from_number)
 
     except Exception as e:
         print(f"❌ ERROR: {e}")
@@ -559,10 +653,9 @@ def manejar_tipo_division(from_number, respuesta):
         except Exception:
             fecha = ahora.strftime("%d/%m/%Y").lstrip("0").replace("/0", "/")
 
-        # Preparar datos una sola vez
         datos_preparados = preparar_datos_transaccion(datos, tipo)
 
-        # Último mensaje al emisor = template WABA
+        # Último mensaje al emisor = template
         enviar_template_pareja(from_number, datos_preparados, template_name="expense_notification_v1")
 
         # Guardar en background
@@ -574,7 +667,6 @@ def manejar_tipo_division(from_number, respuesta):
         )
         t.start()
 
-        # Limpiar estado inmediatamente
         del conversaciones[from_number]
 
     except Exception as e:
@@ -582,27 +674,6 @@ def manejar_tipo_division(from_number, respuesta):
         import traceback
         traceback.print_exc()
         send_meta_message(from_number, f"❌ Error: {str(e)}")
-
-def manejar_pagador(from_number, respuesta):
-    """Maneja quién pagó."""
-    try:
-        if respuesta.lower() in ["1", "manu", "manuel"]:
-            pagador = "Manu"
-        elif respuesta.lower() in ["2", "cami", "camila"]:
-            pagador = "Cami"
-        else:
-            send_meta_message(from_number, "❌ Opción no válida. Responde 1 o 2")
-            return
-
-        conversaciones[from_number]["pagador"] = pagador
-        conversaciones[from_number]["estado"] = "esperando_tipo"
-
-        enviar_tipo_division(from_number, pagador)
-
-    except Exception as e:
-        print(f"❌ ERROR: {e}")
-        import traceback
-        traceback.print_exc()
 
 
 def copiar_formato_fila(sheet, fila_origen, fila_destino, col_end=8):
@@ -676,13 +747,13 @@ def _guardar_transaccion_en_sheets(from_number, datos, fecha):
         fila = encontrar_ultima_fila_categoria(datos["categoria"])
 
         nueva_fila = [
-            "",                    # A
-            "",                    # B
-            datos["tienda"],       # C
-            datos["monto"],        # D
-            fecha,                 # E
-            datos["pagador"],      # F
-            datos["tipo"]          # G
+            "",               # A
+            "",               # B
+            datos["tienda"],  # C
+            datos["monto"],   # D
+            fecha,            # E
+            datos["pagador"], # F
+            datos["tipo"]     # G
         ]
 
         sheet.update(f"A{fila}:G{fila}", [nueva_fila], value_input_option="USER_ENTERED")
