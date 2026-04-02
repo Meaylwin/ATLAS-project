@@ -179,6 +179,14 @@ def send_meta_message(to_number, message):
 def _norm_num(n):
     return re.sub(r'\D', '', str(n))
 
+def format_number_dot(n):
+    """Formato con separador de miles '.' para mensajes FB (Ej: 1.234)."""
+    try:
+        n_int = int(n)
+        return f"{n_int:,}".replace(",", ".")
+    except Exception:
+        return str(n)
+
 def enviar_template_pareja(to_number, datos, template_name="expense_notification_v1"):
     """Envía una plantilla de WhatsApp a la pareja."""
     url = f"https://graph.facebook.com/v18.0/{META_PHONE_NUMBER_ID}/messages"
@@ -190,7 +198,7 @@ def enviar_template_pareja(to_number, datos, template_name="expense_notification
     components = [
         {"type": "body", "parameters": [
             {"type": "text", "text": datos.get('tienda', '')},
-            {"type": "text", "text": str(datos.get('monto', ''))},
+            {"type": "text", "text": format_number_dot(datos.get('monto', ''))},
             {"type": "text", "text": datos.get('categoria', '')},
             {"type": "text", "text": datos.get('pagador', '')},
             {"type": "text", "text": datos.get('tipo', '')},
@@ -245,21 +253,22 @@ def notificar_pareja(from_number, datos):
 
     pagador = datos['pagador']
     tipo = datos['tipo']
-    monto = datos['monto']
+    monto = monto_formateado = format_number_dot(datos['monto'])
     monto_deuda = datos.get("monto_deuda", 0)
 
     # Texto de deuda (usa el formato existente)
-    if pagador == "Manu":
-        texto_deuda = f"Te deben ${monto_deuda:,}"
-    else:
-        texto_deuda = f"Tú debes ${monto_deuda:,}"
+    texto_deuda = (
+        f"Te deben ${format_number_dot(monto_deuda)}"
+        if pagador == "Manu"
+        else f"Tú debes ${format_number_dot(monto_deuda)}"
+    )
     datos["texto_deuda"] = texto_deuda
 
     # Enviar siempre por plantilla (no ruta libre)
     enviar_template_pareja(notificar_a, datos, template_name="expense_notification_v1")
 
     confirmacion_emisor = (
-        f"✅ Notificación enviada a {destinatario_label} usando plantilla (expense_notification_v1)."
+        f"✅ Notificación enviada a {destinatario_label}"
     )
     send_meta_message(from_number, confirmacion_emisor)
 
