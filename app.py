@@ -95,22 +95,21 @@ def format_number_dot(n):
 
 
 def calcular_monto_deuda(monto_num, pagador, tipo):
-    """Calcula cuánto debe la otra persona al pagador."""
+    """Calcula cuánto debe la otra persona al pagador, corrigiendo impares en 50/50."""
     monto_num = to_int(monto_num, default=0)
-
+    
     if tipo == "100%":
         return monto_num
-
-    if tipo == "50/50":
-        return int(round(monto_num / 2.0))
-
-    if tipo == "%":
+    elif tipo == "50/50":
+        mitad = monto_num // 2
+        # Si es impar, que la otra persona pague el menor y el pagador se queda con el resto
+        return mitad
+    elif tipo == "%":
         if pagador == "Manu":
             return int(round(monto_num * PCT_CAMI))
         if pagador == "Cami":
             return int(round(monto_num * PCT_MANU))
         return 0
-
     return 0
 
 
@@ -260,6 +259,83 @@ def send_meta_message(to_number, message):
         traceback.print_exc()
         return None
 
+def manejar_categoria(from_number, respuesta):
+    """Maneja selección de categoría con botones interactivos únicamente."""
+    try:
+        datos = conversaciones[from_number]
+        categorias = datos["categorias"]
+
+        # Convertimos la respuesta a categoría según botón (el payload del botón ya tiene el nombre)
+        categoria = respuesta.strip()
+        if categoria not in categorias:
+            send_meta_message(from_number, "❌ Categoría no válida. Intenta de nuevo usando los botones.")
+            return
+
+        conversaciones[from_number]["categoria"] = categoria
+        conversaciones[from_number]["estado"] = "esperando_pagador"
+
+        # --- Enviar botón de selección de pagador ---
+        interactive_payload = {
+            "messaging_product": "whatsapp",
+            "to": _norm_num(from_number),
+            "type": "interactive",
+            "interactive": {
+                "type": "button",
+                "body": {"text": f"✅ Categoría: {categoria}\n💳 ¿Quién pagó?"},
+                "action": {
+                    "buttons": [
+                        {"type": "reply", "reply": {"id": "manu_paid", "title": "Manu"}},
+                        {"type": "reply", "reply": {"id": "cami_paid", "title": "Cami"}}
+                    ]
+                }
+            }
+        }
+
+        url = f"https://graph.facebook.com/v18.0/{META_PHONE_NUMBER_ID}/messages"
+        headers = {
+            "Authorization": f"Bearer {META_ACCESS_TOKEN}",
+            "Content-Type": "application/json"
+        }
+        requests.post(url, headers=headers, json=interactive_payload, timeout=30)
+
+    except Exception as e:
+        print(f"❌ ERROR: {e}")
+        import traceback
+        traceback.print_exc()
+
+def enviar_tipo_division(from_number):
+    """Envía botones interactivos para que el usuario elija tipo de división."""
+    try:
+        interactive_payload = {
+            "messaging_product": "whatsapp",
+            "to": _norm_num(from_number),
+            "type": "interactive",
+            "interactive": {
+                "type": "button",
+                "body": {
+                    "text": "📊 ¿Cómo se divide el gasto?"
+                },
+                "action": {
+                    "buttons": [
+                        {"type": "reply", "reply": {"id": "tipo_100", "title": "100% (debe pagar el otro)"}},
+                        {"type": "reply", "reply": {"id": "tipo_50", "title": "50/50"}},
+                        {"type": "reply", "reply": {"id": "tipo_pct", "title": "57/43 %"}}
+                    ]
+                }
+            }
+        }
+
+        url = f"https://graph.facebook.com/v18.0/{META_PHONE_NUMBER_ID}/messages"
+        headers = {
+            "Authorization": f"Bearer {META_ACCESS_TOKEN}",
+            "Content-Type": "application/json"
+        }
+        requests.post(url, headers=headers, json=interactive_payload, timeout=30)
+
+    except Exception as e:
+        print(f"❌ ERROR enviando tipo de división: {e}")
+        import traceback
+        traceback.print_exc()
 
 def enviar_template_pareja(to_number, datos, template_name="expense_notification_v1"):
     """Envía plantilla de WhatsApp con datos del gasto al destinatario indicado."""
@@ -356,28 +432,35 @@ def webhook_route():
                     print(f"STATUS: id={status_id} to={recipient} status={status_text} ts={timestamp}")
 
                 # Procesar mensajes entrantes
-                if "messages" in value:
-                    for message in value.get("messages", []):
-                        from_number = message.get("from")
+                for message in value.get("messages", []):
+                    from_number = message.get("from")
 
-                        # Mensajes de texto
-                        if message.get("type") == "text":
-                            message_text = message.get("text", {}).get("body", "")
-                            procesar_mensaje(from_number, message_text)
+                    # Mensajes de texto
+                    if message.get("type") == "text":
+                        message_text = message.get("text", {}).get("body", "")
+                        procesar_mensaje(from_number, message_text)
 
-                        # Botones interactivos (button_reply)
-                        elif message.get("type") == "interactive":
-                            interactive = message.get("interactive", {})
-                            if interactive.get("type") == "button_reply":
-                                button_id = interactive.get("button_reply", {}).get("id")
-                                # Convertimos el id a un valor que tu flujo entiende
-                                if button_id == "manu_paid":
-                                    procesar_mensaje(from_number, "1")
-                                elif button_id == "cami_paid":
-                                    procesar_mensaje(from_number, "2")
+                    # Botones interactivos
+                    elif message.get("type") == "interactive":
+                        interactive = message.get("interactive", {})
+                        if interactive.get("type") == "button_reply":
+                            button_id = interactive.get("button_reply", {}).get("id")
+
+                            # Pagador
+                            if button_id == "manu_paid":
+                                procesar_mensaje(from_number, "Manu")
+                                enviar_tipo_division(from_number)
+                            elif button_id == "cami_paid":
+                                procesar_mensaje(from_number, "Cami")
+                                enviar_tipo_division(from_number)
+
+                            # Tipo de división
+                            elif button_id in ["tipo_100", "tipo_50", "tipo_pct"]:
+                                # Convertimos el botón en la respuesta que entiende manejar_tipo_division
+                                mapping = {"tipo_100": "1", "tipo_50": "2", "tipo_pct": "3"}
+                                procesar_mensaje(from_number, mapping[button_id])
 
     return jsonify({"status": "ok"}), 200
-
 
 def procesar_mensaje(from_number, mensaje):
     """Procesa mensajes."""
@@ -500,66 +583,6 @@ def manejar_tipo_division(from_number, respuesta):
         traceback.print_exc()
         send_meta_message(from_number, f"❌ Error: {str(e)}")
 
-
-def manejar_categoria(from_number, respuesta):
-    """Maneja selección de categoría con botones interactivos."""
-    try:
-        datos = conversaciones[from_number]
-        categorias = datos["categorias"]
-
-        if respuesta.isdigit():
-            idx = int(respuesta) - 1
-            if 0 <= idx < len(categorias):
-                categoria = categorias[idx]
-            else:
-                send_meta_message(from_number, "❌ Número inválido. Intenta de nuevo.")
-                return
-        else:
-            respuesta_lower = respuesta.lower().strip()
-            categoria = None
-            for cat in categorias:
-                if cat.lower() == respuesta_lower:
-                    categoria = cat
-                    break
-            if not categoria:
-                send_meta_message(from_number, "❌ Categoría no válida. Intenta de nuevo.")
-                return
-
-        conversaciones[from_number]["categoria"] = categoria
-        conversaciones[from_number]["estado"] = "esperando_pagador"
-
-        # --- send_meta_message con botón interactivo ---
-        interactive_payload = {
-            "messaging_product": "whatsapp",
-            "to": _norm_num(from_number),
-            "type": "interactive",
-            "interactive": {
-                "type": "button",
-                "body": {
-                    "text": f"✅ Categoría: {categoria}\n💳 ¿Quién pagó?"
-                },
-                "action": {
-                    "buttons": [
-                        {"type": "reply", "reply": {"id": "manu_paid", "title": "1️⃣ Manu"}},
-                        {"type": "reply", "reply": {"id": "cami_paid", "title": "2️⃣ Cami"}}
-                    ]
-                }
-            }
-        }
-
-        url = f"https://graph.facebook.com/v18.0/{META_PHONE_NUMBER_ID}/messages"
-        headers = {
-            "Authorization": f"Bearer {META_ACCESS_TOKEN}",
-            "Content-Type": "application/json"
-        }
-        requests.post(url, headers=headers, json=interactive_payload, timeout=30)
-
-    except Exception as e:
-        print(f"❌ ERROR: {e}")
-        import traceback
-        traceback.print_exc()
-
-
 def manejar_pagador(from_number, respuesta):
     """Maneja quién pagó."""
     try:
@@ -574,16 +597,7 @@ def manejar_pagador(from_number, respuesta):
         conversaciones[from_number]["pagador"] = pagador
         conversaciones[from_number]["estado"] = "esperando_tipo"
 
-        message = (
-            f"✅ Pagó: *{pagador}*\n\n"
-            f"📊 ¿Cómo se divide?\n\n"
-            f"1️⃣ 100% (debe pagar el otro)\n"
-            f"2️⃣ 50/50\n"
-            f"3️⃣ % (Manu 57% / Cami 43%)\n\n"
-            f"Responde *1*, *2* o *3*"
-        )
-
-        send_meta_message(from_number, message)
+        enviar_tipo_division(from_number, pagador)
 
     except Exception as e:
         print(f"❌ ERROR: {e}")
