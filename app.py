@@ -46,7 +46,8 @@ SHEET_NAME = f"F. {MESES_ES[datetime.now().month - 1]}"
 
 
 def get_sheet():
-    """Conecta con Google Sheets"""
+    """Conecta con Google Sheets y asegura que exista la hoja del mes actual.
+    Si no existe, la crea duplicando la hoja de plantilla 'F. Template'."""
     spreadsheet_id = os.getenv("SPREADSHEET_ID")
     creds_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
 
@@ -58,7 +59,46 @@ def get_sheet():
 
     client = gspread.authorize(creds)
     spreadsheet = client.open_by_key(spreadsheet_id)
-    return spreadsheet.worksheet(SHEET_NAME)
+
+    try:
+        # Intentar obtener la hoja del mes actual
+        sheet = spreadsheet.worksheet(SHEET_NAME)
+        return sheet
+    except WorksheetNotFound:
+        # Si no existe, intentar crearla duplicando desde la plantilla
+        try:
+            template_sheet = spreadsheet.worksheet("F. Template")
+            source_sheet_id = template_sheet.id  # id de la hoja plantilla
+
+            # Construir petición para duplicar la hoja
+            body = {
+                "requests": [
+                    {
+                        "duplicateSheet": {
+                            "sourceSheetId": source_sheet_id,
+                            "newSheetName": SHEET_NAME
+                        }
+                    }
+                ]
+            }
+
+            spreadsheet.batch_update(body)
+
+            # Intentar obtener la nueva hoja creada
+            sheet = spreadsheet.worksheet(SHEET_NAME)
+            print(f"✅ Hoja '{SHEET_NAME}' creada a partir de 'F. Template'.")
+            return sheet
+        except Exception as e:
+            print(f"❌ Error creando hoja desde template: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
+    except Exception as e:
+        # Otros errores al abrir la hoja
+        print(f"❌ Error al obtener la hoja: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
 
 
 def encontrar_ultima_fila_categoria(categoria):
