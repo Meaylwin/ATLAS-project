@@ -62,50 +62,51 @@ def get_sheet():
 
 
 def encontrar_ultima_fila_categoria(categoria):
-    """Encuentra la última fila vacía de una categoría para agregar"""
+    """Determina la próxima fila disponible para una categoría dada.
+    Mantiene el bloque de cada categoría separado por cabeceras y evita
+    sobrescribir cabeceras de otras categorías.
+    """
     try:
         sheet = get_sheet()
 
-        # Buscar la fila donde está la categoría
-        cell = sheet.find(categoria, in_column=2)  # Buscar en columna B
-
+        # 1) Localizar la cabecera de la categoría en la columna B
+        cell = sheet.find(categoria, in_column=2)
         if not cell:
+            # Si no se encuentra la cabecera, insertamos al final de la hoja
             return len(sheet.col_values(1)) + 1
 
-        fila_inicio = cell.row + 1
-        valores_columna_c = sheet.col_values(3)
+        cabecera_fila = cell.row  # fila donde está la cabecera de la categoría
 
-        # ✅ usa tus categorías fijas (incluye Alimentos)
-        categorias = CATEGORIAS_FIJAS
-
-        # ⚠️ (mínimo cambio): evitamos tocar la estructura original,
-        # pero reducimos un poco las llamadas repetidas dentro del loop
+        # 2) Encontrar la próxima cabecera de cualquier categoría (si existe)
         col_b = sheet.col_values(2)
+        proxima_cabecera_fila = None
+        for r in range(cabecera_fila + 1, len(col_b) + 1):
+            val_b = col_b[r - 1].strip() if r - 1 < len(col_b) else ""
+            if val_b in CATEGORIAS_FIJAS:
+                proxima_cabecera_fila = r
+                break
 
-        for i in range(fila_inicio - 1, len(valores_columna_c)):
-            # Verificar si llegamos a otra categoría (en columna B)
-            valor_b = col_b[i].strip() if i < len(col_b) and col_b[i] else ""
-            if valor_b in categorias and (i + 1) != cell.row:
-                return i + 1
+        # Si no hay próxima cabecera, trabajamos con el final de la hoja
+        if not proxima_cabecera_fila:
+            proxima_cabecera_fila = len(sheet.col_values(3)) + 1
 
-            # Verificar si la fila está vacía en columna C
-            if i >= len(valores_columna_c) or not valores_columna_c[i].strip():
-                return i + 1
+        # 3) Buscar la última fila con datos en la columna C (tienda) dentro este bloque
+        col_c = sheet.col_values(3)
+        ultima_fila_con_datos = cabecera_fila  # al menos la cabecera existe
+        for r in range(cabecera_fila + 1, proxima_cabecera_fila):
+            valor_c = col_c[r - 1].strip() if r - 1 < len(col_c) else ""
+            if valor_c:
+                ultima_fila_con_datos = r
 
-        return len(valores_columna_c) + 1
+        # 4) La próxima fila libre dentro del bloque de esta categoría
+        return ultima_fila_con_datos + 1
 
     except Exception as e:
-        print(f"Error encontrando fila: {e}")
+        print(f"❌ ERROR al determinar fila de categoría: {e}")
         import traceback
         traceback.print_exc()
-        defaults = {
-            'Hogar': 13,
-            'Alimentos': 18,
-            'Compras': 31,
-            'Otros': 45
-        }
-        return defaults.get(categoria, 31)
-
+        # Fallback conservador (en caso de fallo)
+        return 31
 
 def send_meta_message(to_number, message):
     """Envía mensaje con Meta Cloud API"""
