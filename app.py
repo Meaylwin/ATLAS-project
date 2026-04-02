@@ -8,8 +8,11 @@ from google.oauth2.service_account import Credentials
 import requests
 import threading
 import re
+import requests
 from zoneinfo import ZoneInfo
 from gspread.exceptions import WorksheetNotFound
+from datetime import datetime, timedelta
+
 
 app = Flask(__name__)
 
@@ -184,14 +187,20 @@ def _norm_num(n):
     return re.sub(r'\D', '', str(n))
 
 
+def can_send_freeform(to_number):
+    """Determina si aún estamos dentro de la ventana de 24h desde la última interacción entrante."""
+    last_inbound = LAST_INBOUND_BY_NUMBER.get(_norm_num(to_number))
+    if not last_inbound:
+        return False
+    return datetime.now(CHILE_TZ) - last_inbound <= timedelta(hours=24)
+
 def notificar_pareja(from_number, datos):
-    """Notifica a la pareja cuando alguien registra un gasto"""
-    # Verificar que tengamos los números de Manu y Cami
+    """Notifica a la pareja cuando alguien registra un gasto."""
     if not NUMERO_MANU or not NUMERO_CAMI:
         print("⚠️ Notificación no enviada: NUMERO_MANU o NUMERO_CAMI no definidos.")
         return
 
-    # Normalizar y determinar destinatario
+    # Determina destinatario (quién debe recibir la notificación)
     f = _norm_num(from_number)
     m = _norm_num(NUMERO_MANU)
     c = _norm_num(NUMERO_CAMI)
@@ -199,9 +208,11 @@ def notificar_pareja(from_number, datos):
     if f == m:
         notificar_a = NUMERO_CAMI
         quien_registro = "Manu"
+        destinatario_label = "Cami"
     elif f == c:
         notificar_a = NUMERO_MANU
         quien_registro = "Cami"
+        destinatario_label = "Manu"
     else:
         print("⚠️ Remitente no coincide con Manu ni con Cami.")
         return
@@ -210,32 +221,36 @@ def notificar_pareja(from_number, datos):
     tipo = datos['tipo']
     monto = datos['monto']
 
-    if tipo == "100%":
-        monto_deuda = 0 if pagador == quien_registro else monto
-    elif tipo == "50/50":
-        monto_deuda = monto / 2
-    else:  # %
-        if pagador == "Manu":
-            monto_deuda = round(monto * 0.43, 2)
-        else:
-            monto_deuda = round(monto * 0.57, 2)
+    if can_send_freeform(notificar_a):
+        # Enviar mensaje de texto dentro de la ventana
+        mensaje = (
+            f"🔔 *Nuevo Gasto Registrado*\n\n"
+            f"━━━━━━━━━━━━━━\n"
+            f"📝 {datos['tienda']}\n"
+            f"💵 ${monto:,}\n"
+            f"📂 {datos['categoria']}\n"
+            f"💳 Pagó: {pagador}\n"
+            f"📊 División: {tipo}\n\n"
+            f"💰 Tú debes: *${datos.get('monto_deuda', 0):,.2f}*\n"
+            f"━━━━━━━━━━━━━━\n\n"
+            f"📄 Se guardará en *{SHEET_NAME}*\n"
+            f"🔗 Ver hoja: {SHEET_URL}"
+        )
 
-    mensaje = (
-        f"🔔 *Nuevo Gasto Registrado*\n\n"
-        f"━━━━━━━━━━━━━━\n"
-        f"📝 {datos['tienda']}\n"
-        f"💵 ${monto:,}\n"
-        f"📂 {datos['categoria']}\n"
-        f"💳 Pagó: {pagador}\n"
-        f"📊 División: {tipo}\n\n"
-        f"💰 Tú debes: *${monto_deuda:,.2f}*\n"
-        f"━━━━━━━━━━━━━━\n\n"
-        f"📄 Se guardará en *{SHEET_NAME}*\n"
-        f"🔗 Ver hoja: {SHEET_URL}"
-    )
+        send_meta_message(notificar_a, mensaje)
 
-    send_meta_message(notificar_a, mensaje)
+        # Confirmación al emisor
+        confirmacion_emisor = f"✅ Notificación enviada a {destinatario_label} (texto) dentro de la ventana de 24h."
+        send_meta_message(from_number, confirmacion_emisor)
+    else:
+        # Enviar plantillas fuera de la ventana
+        enviar_template_pareja(notificar_a, datos, template_name="gasto_registrado_template")
 
+        # Confirmación al emisor
+        confirmacion_emisor = (
+            f"✅ Notificación enviada a {destinatario_label} usando plantilla (fuera de la ventana 24h)."
+        )
+        send_meta_message(from_number, confirmacion_emisor)
 
 @app.route("/webhook", methods=["GET", "POST"])
 def webhook():
@@ -344,6 +359,63 @@ def procesar_nuevo_gasto(from_number, mensaje):
         print(f"❌ ERROR: {e}")
         import traceback
         traceback.print_exc()
+
+def manejar_tipo_division(from_number, respuesta):
+    """Maneja tipo de división y guarda en Sheets"""
+    try:
+        datos = conversaciones[from_number]
+
+        if respuesta.lower() in ["1", "100", "100%"]:
+            tipo = "100%"
+        elif respuesta.lower() in ["2", "50/50", "50", "mitad"]:
+            tipo = "50/50"
+        elif respuesta.lower() in ["3", "%", "porcentaje", "pct"]:
+            tipo = "%"
+        else:
+            send_meta_message(from_number, "❌ Opción no válida. Responde 1, 2 o 3")
+            return
+
+        ahora = datetime.now(CHILE_TZ)
+
+        try:
+            fecha = ahora.strftime("%-d/%-m/%Y")
+        except:
+            fecha = ahora.strftime("%d/%m/%Y").lstrip("0").replace("/0", "/")
+
+        # ✅ 1) Responder INMEDIATO al usuario (antes de Sheets)
+        message = (
+            f"✅ *Creada transacción*\n\n"
+            f"━━━━━━━━━━━━━━\n"
+            f"📝 {datos['tienda']}\n"
+            f"💵 ${datos['monto']:,}\n"
+            f"📂 {datos['categoria']}\n"
+            f"💳 Pagó: {datos['pagador']}\n"
+            f"📊 División: {tipo}\n"
+            f"📅 Fecha: {fecha}\n"
+            f"━━━━━━━━━━━━━━\n\n"
+            f"📄 Se guardará en *{SHEET_NAME}*\n"
+            f"🔗 Ver hoja: {SHEET_URL}"
+        )
+        send_meta_message(from_number, message)
+
+        # ✅ 2) Guardar en background (y solo avisar si falla)
+        datos_copia = dict(datos)  # evita problemas si borramos la conversación
+        t = threading.Thread(
+            target=_guardar_transaccion_en_sheets,
+            args=(from_number, datos_copia, tipo, fecha),
+            daemon=True
+        )
+        t.start()
+
+        # ✅ 3) Limpiar estado inmediatamente (no esperar a Sheets)
+        del conversaciones[from_number]
+
+    except Exception as e:
+        print(f"❌ ERROR: {e}")
+        import traceback
+        traceback.print_exc()
+        send_meta_message(from_number, f"❌ Error: {str(e)}")
+
 
 
 def manejar_categoria(from_number, respuesta):
@@ -520,61 +592,45 @@ def _guardar_transaccion_en_sheets(from_number, datos, tipo, fecha):
         send_meta_message(from_number, f"❌ Error al guardar en Google Sheets: {str(e)}")
 
 
-def manejar_tipo_division(from_number, respuesta):
-    """Maneja tipo de división y guarda en Sheets"""
+def enviar_template_pareja(to_number, datos, template_name="sheet_url_with_button_es_us"):
+    """Envía una plantilla de WhatsApp a la pareja (nome: sheet_url_with_button_es_us)."""
+
+    url = f"https://graph.facebook.com/v18.0/{META_PHONE_NUMBER_ID}/messages"
+    headers = {
+        "Authorization": f"Bearer {META_ACCESS_TOKEN}",
+        "Content-Type": "application/json"
+    }
+
+    # Ajusta estos parámetros a las placeholders reales de tu plantilla
+    components = [
+        {"type": "body", "parameters": [
+            {"type": "text", "text": datos.get('pagador', '')},   
+            {"type": "text", "text": str(datos.get('monto', ''))},
+            {"type": "text", "text": datos.get('categoria', '')},
+            {"type": "text", "text": datos.get('tienda', '')},
+            {"type": "text", "text": datos.get('tipo', '')},
+            {"type": "text", "text": str(datos.get('fecha', ''))},
+            {"type": "text", "text": SHEET_NAME}
+        ]}
+    ]
+
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": _norm_num(to_number),
+        "type": "template",
+        "template": {
+            "name": template_name,
+            "language": {"code": "es_CL"},
+            "components": components
+        }
+    }
+
     try:
-        datos = conversaciones[from_number]
-
-        if respuesta.lower() in ["1", "100", "100%"]:
-            tipo = "100%"
-        elif respuesta.lower() in ["2", "50/50", "50", "mitad"]:
-            tipo = "50/50"
-        elif respuesta.lower() in ["3", "%", "porcentaje", "pct"]:
-            tipo = "%"
-        else:
-            send_meta_message(from_number, "❌ Opción no válida. Responde 1, 2 o 3")
-            return
-
-        ahora = datetime.now(CHILE_TZ)
-
-        try:
-            fecha = ahora.strftime("%-d/%-m/%Y")
-        except:
-            fecha = ahora.strftime("%d/%m/%Y").lstrip("0").replace("/0", "/")
-
-        # ✅ 1) Responder INMEDIATO al usuario (antes de Sheets)
-        message = (
-            f"✅ *Creada transacción*\n\n"
-            f"━━━━━━━━━━━━━━\n"
-            f"📝 {datos['tienda']}\n"
-            f"💵 ${datos['monto']:,}\n"
-            f"📂 {datos['categoria']}\n"
-            f"💳 Pagó: {datos['pagador']}\n"
-            f"📊 División: {tipo}\n"
-            f"📅 Fecha: {fecha}\n"
-            f"━━━━━━━━━━━━━━\n\n"
-            f"📄 Se guardará en *{SHEET_NAME}*\n"
-            f"🔗 Ver hoja: {SHEET_URL}"
-        )
-        send_meta_message(from_number, message)
-
-        # ✅ 2) Guardar en background (y solo avisar si falla)
-        datos_copia = dict(datos)  # evita problemas si borramos la conversación
-        t = threading.Thread(
-            target=_guardar_transaccion_en_sheets,
-            args=(from_number, datos_copia, tipo, fecha),
-            daemon=True
-        )
-        t.start()
-
-        # ✅ 3) Limpiar estado inmediatamente (no esperar a Sheets)
-        del conversaciones[from_number]
-
+        resp = requests.post(url, headers=headers, json=payload, timeout=30)
+        return resp.json()
     except Exception as e:
-        print(f"❌ ERROR: {e}")
-        import traceback
-        traceback.print_exc()
-        send_meta_message(from_number, f"❌ Error: {str(e)}")
+        print(f"❌ ERROR enviando plantilla: {e}")
+        return None
 
 
 @app.route("/")
