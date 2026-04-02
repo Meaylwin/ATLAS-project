@@ -221,7 +221,7 @@ def enviar_template_pareja(to_number, datos, template_name="expense_notification
 
 def notificar_pareja(from_number, datos):
     """Notifica a la pareja cuando alguien registra un gasto.
-    Enfoque recomendado: enviar siempre por plantilla (WG) para cumplir políticas.
+    Enfoque: siempre usar plantilla (expense_notification_v1).
     """
 
     if not NUMERO_MANU or not NUMERO_CAMI:
@@ -248,18 +248,18 @@ def notificar_pareja(from_number, datos):
     monto = datos['monto']
     monto_deuda = datos.get("monto_deuda", 0)
 
-    # Preparar texto de deuda (mismo formato que tenía tu código)
+    # Texto de deuda (usa el formato existente)
     if pagador == "Manu":
         texto_deuda = f"Te deben ${monto_deuda:,}"
     else:
         texto_deuda = f"Tú debes ${monto_deuda:,}"
     datos["texto_deuda"] = texto_deuda
 
-    # Enviar siempre por plantilla (sin importar ventana 24h)
-    enviar_template_pareja(notificar_a, datos, template_name="gasto_registrado_template")
+    # Enviar siempre por plantilla (no ruta libre)
+    enviar_template_pareja(notificar_a, datos, template_name="expense_notification_v1")
 
     confirmacion_emisor = (
-        f"✅ Notificación enviada a {destinatario_label} usando plantilla."
+        f"✅ Notificación enviada a {destinatario_label} usando plantilla (expense_notification_v1)."
     )
     send_meta_message(from_number, confirmacion_emisor)
 
