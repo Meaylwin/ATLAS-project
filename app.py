@@ -274,9 +274,9 @@ def enviar_tipo_division(from_number):
                 },
                 "action": {
                     "buttons": [
-                        {"type": "reply", "reply": {"id": "tipo_100", "title": "100%"}},
+                        {"type": "reply", "reply": {"id": "tipo_pct", "title": "57/43%"}},
                         {"type": "reply", "reply": {"id": "tipo_50", "title": "50/50"}},
-                        {"type": "reply", "reply": {"id": "tipo_pct", "title": "57/43 %"}}
+                        {"type": "reply", "reply": {"id": "tipo_100", "title": "100%"}}
                     ]
                 }
             }
