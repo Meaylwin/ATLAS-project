@@ -338,7 +338,7 @@ def get_sheet():
     if not spreadsheet_id or not creds_json:
         raise ValueError("Faltan variables de entorno de Google Sheets")
 
-    creds_info = json.loads(json.loads(creds_json))
+    creds_info = json.loads(creds_json)
     creds = Credentials.from_service_account_info(creds_info, scopes=SCOPE)
 
     client = gspread.authorize(creds)
