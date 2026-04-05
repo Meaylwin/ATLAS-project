@@ -558,19 +558,22 @@ def manejar_tipo_division(from_number, respuesta):
             send_meta_message(from_number, "❌ Opción no válida. Responde 1, 2 o 3")
             return
 
-        ahora = datetime.now(CHILE_TZ)
+        # Enviar plantilla al emisor tan pronto como tengamos los datos
+        datos_preparados = preparar_datos_transaccion(datos, tipo)
+        try:
+            enviar_template(from_number, datos_preparados, template_name="expense_notification_v1")
+        except Exception as e:
+            print(f"❌ ERROR enviando plantilla: {e}")
+            import traceback
+            traceback.print_exc()
 
+        # Luego, guardar en background (fecha para la hoja)
+        ahora = datetime.now(CHILE_TZ)
         try:
             fecha = ahora.strftime("%-d/%-m/%Y")
         except Exception:
             fecha = ahora.strftime("%d/%m/%Y").lstrip("0").replace("/0", "/")
 
-        datos_preparados = preparar_datos_transaccion(datos, tipo)
-
-        # Último mensaje al emisor = template
-        enviar_template(from_number, datos_preparados, template_name="expense_notification_v1")
-
-        # Guardar en background
         datos_copia = dict(datos_preparados)
         t = threading.Thread(
             target=_guardar_transaccion_en_sheets,
@@ -676,88 +679,6 @@ def _guardar_transaccion_en_sheets(from_number, datos, fecha):
         import traceback
         traceback.print_exc()
         send_meta_message(from_number, f"❌ Error al guardar en Google Sheets: {str(e)}")
-
-# Webhook combinado (GET para verificación, POST para mensajes)
-@app.route("/webhook", methods=["GET", "POST"])
-def webhook():
-    # 🔹 VERIFICACIÓN (GET)
-    verify_token = os.getenv("META_VERIFY_TOKEN")
-
-    if request.method == "GET":
-        mode = request.args.get("hub.mode")
-        token = request.args.get("hub.verify_token")
-        challenge = request.args.get("hub.challenge")
-
-        if mode == "subscribe" and token == verify_token:
-            return challenge, 200
-        else:
-            return "Forbidden", 403
-
-    # 🔹 MENSAJES (POST)
-    if request.method == "POST":
-        data = request.json
-
-        if not data:
-            return jsonify({"status": "no_data"}), 200
-
-        if data.get("object") == "whatsapp_business_account":
-            for entry in data.get("entry", []):
-                for change in entry.get("changes", []):
-                    value = change.get("value", {})
-
-                    # Status updates
-                    for status in value.get("statuses", []):
-                        status_id = status.get("id")
-                        status_text = status.get("status")
-                        recipient = status.get("recipient_id")
-                        timestamp = status.get("timestamp")
-                        print(f"STATUS: id={status_id} to={recipient} status={status_text} ts={timestamp}")
-
-                    # Mensajes entrantes
-                    for message in value.get("messages", []):
-                        from_number = message.get("from")
-
-                        if message.get("type") == "text":
-                            message_text = message.get("text", {}).get("body", "")
-                            procesar_mensaje(from_number, message_text)
-
-                        elif message.get("type") == "interactive":
-                            interactive = message.get("interactive", {})
-
-                            # Lista de categorías
-                            if interactive.get("type") == "list_reply":
-                                list_id = interactive.get("list_reply", {}).get("id")
-
-                                mapping_categorias = {
-                                    "cat_Hogar": "Hogar",
-                                    "cat_Alimentos": "Alimentos",
-                                    "cat_Compras": "Compras",
-                                    "cat_Deporte": "Deporte",
-                                    "cat_Otros": "Otros",
-                                }
-
-                                if list_id in mapping_categorias:
-                                    procesar_mensaje(from_number, mapping_categorias[list_id])
-
-                            # Botones
-                            elif interactive.get("type") == "button_reply":
-                                button_id = interactive.get("button_reply", {}).get("id")
-
-                                if button_id == "manu_paid":
-                                    procesar_mensaje(from_number, "Manu")
-
-                                elif button_id == "cami_paid":
-                                    procesar_mensaje(from_number, "Cami")
-
-                                elif button_id in ["tipo_100", "tipo_50", "tipo_pct"]:
-                                    mapping_tipos = {
-                                        "tipo_100": "1",
-                                        "tipo_50": "2",
-                                        "tipo_pct": "3",
-                                    }
-                                    procesar_mensaje(from_number, mapping_tipos[button_id])
-
-        return jsonify({"status": "ok"}), 200
 
 @app.route("/")
 def home():
