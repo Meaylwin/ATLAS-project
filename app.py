@@ -54,10 +54,8 @@ MESES_ES = [
 ]
 SHEET_NAME = f"F. {MESES_ES[datetime.now().month - 1]}"
 
-
 def _norm_num(n):
     return re.sub(r"\D", "", str(n or ""))
-
 
 def nombre_por_numero(numero):
     n = _norm_num(numero)
@@ -66,7 +64,6 @@ def nombre_por_numero(numero):
     if n == _norm_num(NUMERO_CAMI):
         return "Cami"
     return None
-
 
 def to_int(n, default=0):
     """Convierte varias representaciones numéricas a int, sin decimales."""
@@ -82,7 +79,6 @@ def to_int(n, default=0):
     except Exception:
         return default
 
-
 def format_number_dot(n):
     """Formatea con separador de miles '.' y sin decimales."""
     try:
@@ -92,7 +88,6 @@ def format_number_dot(n):
         return f"{n_int:,}".replace(",", ".")
     except Exception:
         return str(n)
-
 
 def calcular_monto_deuda(monto_num, pagador, tipo):
     """Calcula cuánto debe la otra persona al pagador."""
@@ -113,7 +108,6 @@ def calcular_monto_deuda(monto_num, pagador, tipo):
 
     return 0
 
-
 def preparar_datos_transaccion(datos, tipo):
     """Calcula una sola vez los datos necesarios para templates/notificaciones."""
     datos_preparados = dict(datos)
@@ -125,7 +119,6 @@ def preparar_datos_transaccion(datos, tipo):
         tipo=tipo,
     )
     return datos_preparados
-
 
 def texto_deuda_para_destinatario(to_number, datos):
     """Devuelve 'Te deben' o 'Tú debes' según quién recibe el mensaje."""
@@ -140,7 +133,6 @@ def texto_deuda_para_destinatario(to_number, datos):
         return f"Tú debes ${format_number_dot(monto_deuda)}"
 
     return f"Saldo ${format_number_dot(monto_deuda)}"
-
 
 def send_meta_message(to_number, message):
     """Envía mensaje de texto con Meta Cloud API."""
@@ -171,7 +163,6 @@ def send_meta_message(to_number, message):
         import traceback
         traceback.print_exc()
         return None
-
 
 def enviar_lista_categorias(from_number, tienda, monto):
     """Envía una lista interactiva de categorías."""
@@ -223,7 +214,6 @@ def enviar_lista_categorias(from_number, tienda, monto):
         import traceback
         traceback.print_exc()
 
-
 def enviar_botones_pagador(from_number, categoria):
     """Envía botones interactivos para elegir quién pagó."""
     try:
@@ -258,7 +248,6 @@ def enviar_botones_pagador(from_number, categoria):
         print(f"❌ ERROR enviando botones de pagador: {e}")
         import traceback
         traceback.print_exc()
-
 
 def enviar_tipo_division(from_number):
     """Envía botones interactivos para elegir tipo de división."""
@@ -295,7 +284,6 @@ def enviar_tipo_division(from_number):
         print(f"❌ ERROR enviando tipo de división: {e}")
         import traceback
         traceback.print_exc()
-
 
 def enviar_template(to_number, datos, template_name="expense_notification_v1"):
     """Envía plantilla de WhatsApp con datos del gasto al destinatario indicado."""
@@ -341,7 +329,6 @@ def enviar_template(to_number, datos, template_name="expense_notification_v1"):
         traceback.print_exc()
         return {"error": str(e)}
 
-
 def get_sheet():
     """Conecta con Google Sheets y asegura que exista la hoja del mes actual.
     Si no existe, la crea duplicando la hoja de plantilla 'F. Template'."""
@@ -351,7 +338,7 @@ def get_sheet():
     if not spreadsheet_id or not creds_json:
         raise ValueError("Faltan variables de entorno de Google Sheets")
 
-    creds_info = json.loads(creds_json)
+    creds_info = json.loads(json.loads(creds_json))
     creds = Credentials.from_service_account_info(creds_info, scopes=SCOPE)
 
     client = gspread.authorize(creds)
@@ -391,7 +378,6 @@ def get_sheet():
         traceback.print_exc()
         raise
 
-
 def encontrar_ultima_fila_categoria(categoria):
     """Determina la próxima fila disponible para una categoría dada."""
     try:
@@ -429,7 +415,6 @@ def encontrar_ultima_fila_categoria(categoria):
         traceback.print_exc()
         return 31
 
-
 def notificar_pareja(from_number, datos):
     """Notifica a la pareja cuando alguien registra un gasto."""
     if not NUMERO_MANU or not NUMERO_CAMI:
@@ -453,76 +438,7 @@ def notificar_pareja(from_number, datos):
 
     enviar_template(notificar_a, datos, template_name="expense_notification_v1")
 
-
-def webhook():
-    """Endpoint para Meta Cloud API"""
-    pass
-
-
-@app.route("/webhook", methods=["POST"])
-def webhook_route():
-    data = request.json
-
-    if data.get("object") == "whatsapp_business_account":
-        for entry in data.get("entry", []):
-            for change in entry.get("changes", []):
-                value = change.get("value", {})
-
-                # Status updates
-                for status in value.get("statuses", []):
-                    status_id = status.get("id")
-                    status_text = status.get("status")
-                    recipient = status.get("recipient_id")
-                    timestamp = status.get("timestamp")
-                    print(f"STATUS: id={status_id} to={recipient} status={status_text} ts={timestamp}")
-
-                # Mensajes entrantes
-                for message in value.get("messages", []):
-                    from_number = message.get("from")
-
-                    if message.get("type") == "text":
-                        message_text = message.get("text", {}).get("body", "")
-                        procesar_mensaje(from_number, message_text)
-
-                    elif message.get("type") == "interactive":
-                        interactive = message.get("interactive", {})
-
-                        # Lista de categorías
-                        if interactive.get("type") == "list_reply":
-                            list_id = interactive.get("list_reply", {}).get("id")
-
-                            mapping_categorias = {
-                                "cat_Hogar": "Hogar",
-                                "cat_Alimentos": "Alimentos",
-                                "cat_Compras": "Compras",
-                                "cat_Deporte": "Deporte",
-                                "cat_Otros": "Otros",
-                            }
-
-                            if list_id in mapping_categorias:
-                                procesar_mensaje(from_number, mapping_categorias[list_id])
-
-                        # Botones
-                        elif interactive.get("type") == "button_reply":
-                            button_id = interactive.get("button_reply", {}).get("id")
-
-                            if button_id == "manu_paid":
-                                procesar_mensaje(from_number, "Manu")
-
-                            elif button_id == "cami_paid":
-                                procesar_mensaje(from_number, "Cami")
-
-                            elif button_id in ["tipo_100", "tipo_50", "tipo_pct"]:
-                                mapping_tipos = {
-                                    "tipo_100": "1",
-                                    "tipo_50": "2",
-                                    "tipo_pct": "3",
-                                }
-                                procesar_mensaje(from_number, mapping_tipos[button_id])
-
-    return jsonify({"status": "ok"}), 200
-
-
+# Resto del archivo permanece igual
 def procesar_mensaje(from_number, mensaje):
     """Procesa mensajes."""
     try:
@@ -542,7 +458,6 @@ def procesar_mensaje(from_number, mensaje):
         print(f"❌ ERROR: {e}")
         import traceback
         traceback.print_exc()
-
 
 def procesar_nuevo_gasto(from_number, mensaje):
     """Procesa nuevo gasto."""
@@ -586,7 +501,6 @@ def procesar_nuevo_gasto(from_number, mensaje):
         import traceback
         traceback.print_exc()
 
-
 def manejar_categoria(from_number, respuesta):
     """Maneja selección de categoría desde lista interactiva."""
     try:
@@ -608,7 +522,6 @@ def manejar_categoria(from_number, respuesta):
         import traceback
         traceback.print_exc()
 
-
 def manejar_pagador(from_number, respuesta):
     """Maneja quién pagó."""
     try:
@@ -629,7 +542,6 @@ def manejar_pagador(from_number, respuesta):
         print(f"❌ ERROR: {e}")
         import traceback
         traceback.print_exc()
-
 
 def manejar_tipo_division(from_number, respuesta):
     """Maneja tipo de división, envía template al emisor y guarda en Sheets."""
@@ -675,7 +587,6 @@ def manejar_tipo_division(from_number, respuesta):
         traceback.print_exc()
         send_meta_message(from_number, f"❌ Error: {str(e)}")
 
-
 def copiar_formato_fila(sheet, fila_origen, fila_destino, col_end=8):
     """Copia el formato de una fila y quita el borde superior de la fila destino."""
     sheet_id = sheet._properties["sheetId"]
@@ -716,7 +627,6 @@ def copiar_formato_fila(sheet, fila_origen, fila_destino, col_end=8):
         ]
     })
 
-
 def asegurar_fila_vacia_debajo(sheet, fila, force=False):
     """
     Inserta una fila vacía en fila+1:
@@ -739,7 +649,6 @@ def asegurar_fila_vacia_debajo(sheet, fila, force=False):
         print("⚠️ No se pudo copiar formato:", e)
 
     return True
-
 
 def _guardar_transaccion_en_sheets(from_number, datos, fecha):
     try:
@@ -768,6 +677,87 @@ def _guardar_transaccion_en_sheets(from_number, datos, fecha):
         traceback.print_exc()
         send_meta_message(from_number, f"❌ Error al guardar en Google Sheets: {str(e)}")
 
+# Webhook combinado (GET para verificación, POST para mensajes)
+@app.route("/webhook", methods=["GET", "POST"])
+def webhook():
+    # 🔹 VERIFICACIÓN (GET)
+    verify_token = os.getenv("META_VERIFY_TOKEN")
+
+    if request.method == "GET":
+        mode = request.args.get("hub.mode")
+        token = request.args.get("hub.verify_token")
+        challenge = request.args.get("hub.challenge")
+
+        if mode == "subscribe" and token == verify_token:
+            return challenge, 200
+        else:
+            return "Forbidden", 403
+
+    # 🔹 MENSAJES (POST)
+    if request.method == "POST":
+        data = request.json
+
+        if not data:
+            return jsonify({"status": "no_data"}), 200
+
+        if data.get("object") == "whatsapp_business_account":
+            for entry in data.get("entry", []):
+                for change in entry.get("changes", []):
+                    value = change.get("value", {})
+
+                    # Status updates
+                    for status in value.get("statuses", []):
+                        status_id = status.get("id")
+                        status_text = status.get("status")
+                        recipient = status.get("recipient_id")
+                        timestamp = status.get("timestamp")
+                        print(f"STATUS: id={status_id} to={recipient} status={status_text} ts={timestamp}")
+
+                    # Mensajes entrantes
+                    for message in value.get("messages", []):
+                        from_number = message.get("from")
+
+                        if message.get("type") == "text":
+                            message_text = message.get("text", {}).get("body", "")
+                            procesar_mensaje(from_number, message_text)
+
+                        elif message.get("type") == "interactive":
+                            interactive = message.get("interactive", {})
+
+                            # Lista de categorías
+                            if interactive.get("type") == "list_reply":
+                                list_id = interactive.get("list_reply", {}).get("id")
+
+                                mapping_categorias = {
+                                    "cat_Hogar": "Hogar",
+                                    "cat_Alimentos": "Alimentos",
+                                    "cat_Compras": "Compras",
+                                    "cat_Deporte": "Deporte",
+                                    "cat_Otros": "Otros",
+                                }
+
+                                if list_id in mapping_categorias:
+                                    procesar_mensaje(from_number, mapping_categorias[list_id])
+
+                            # Botones
+                            elif interactive.get("type") == "button_reply":
+                                button_id = interactive.get("button_reply", {}).get("id")
+
+                                if button_id == "manu_paid":
+                                    procesar_mensaje(from_number, "Manu")
+
+                                elif button_id == "cami_paid":
+                                    procesar_mensaje(from_number, "Cami")
+
+                                elif button_id in ["tipo_100", "tipo_50", "tipo_pct"]:
+                                    mapping_tipos = {
+                                        "tipo_100": "1",
+                                        "tipo_50": "2",
+                                        "tipo_pct": "3",
+                                    }
+                                    procesar_mensaje(from_number, mapping_tipos[button_id])
+
+        return jsonify({"status": "ok"}), 200
 
 @app.route("/")
 def home():
@@ -777,7 +767,6 @@ def home():
     <p>📊 Hoja actual: {SHEET_NAME}</p>
     """
 
-
 @app.route("/health")
 def health():
     return jsonify({
@@ -785,7 +774,6 @@ def health():
         "sheet": SHEET_NAME,
         "conversaciones": len(conversaciones)
     }), 200
-
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8080))
