@@ -274,9 +274,9 @@ def enviar_tipo_division(from_number):
                 },
                 "action": {
                     "buttons": [
-                        {"type": "reply", "reply": {"id": "tipo_100", "title": "100%"}},
+                        {"type": "reply", "reply": {"id": "tipo_pct", "title": "57/43%"}},
                         {"type": "reply", "reply": {"id": "tipo_50", "title": "50/50"}},
-                        {"type": "reply", "reply": {"id": "tipo_pct", "title": "57/43 %"}}
+                        {"type": "reply", "reply": {"id": "tipo_100", "title": "100%"}}
                     ]
                 }
             }
@@ -297,7 +297,7 @@ def enviar_tipo_division(from_number):
         traceback.print_exc()
 
 
-def enviar_template_pareja(to_number, datos, template_name="expense_notification_v1"):
+def enviar_template(to_number, datos, template_name="expense_notification_v1"):
     """Envía plantilla de WhatsApp con datos del gasto al destinatario indicado."""
     url = f"https://graph.facebook.com/v18.0/{META_PHONE_NUMBER_ID}/messages"
     headers = {
@@ -451,7 +451,7 @@ def notificar_pareja(from_number, datos):
     if "tipo" not in datos or "monto_deuda" not in datos:
         datos = preparar_datos_transaccion(datos, datos.get("tipo", ""))
 
-    enviar_template_pareja(notificar_a, datos, template_name="expense_notification_v1")
+    enviar_template(notificar_a, datos, template_name="expense_notification_v1")
 
 
 def webhook():
@@ -656,7 +656,7 @@ def manejar_tipo_division(from_number, respuesta):
         datos_preparados = preparar_datos_transaccion(datos, tipo)
 
         # Último mensaje al emisor = template
-        enviar_template_pareja(from_number, datos_preparados, template_name="expense_notification_v1")
+        enviar_template(from_number, datos_preparados, template_name="expense_notification_v1")
 
         # Guardar en background
         datos_copia = dict(datos_preparados)
