@@ -28,12 +28,8 @@ NUMERO_MANU = os.getenv("NUMERO_MANU")
 NUMERO_CAMI = os.getenv("NUMERO_CAMI")
 
 # Porcentajes para división %
-try:
-    PCT_MANU = float(os.getenv("PCT_MANU", "0.61"))
-    PCT_CAMI = float(os.getenv("PCT_CAMI", "0.39"))
-except Exception:
-    PCT_MANU = 0.61
-    PCT_CAMI = 0.31
+PCT_MANU = 0.61
+PCT_CAMI = 0.39
 
 # TimeZone
 CHILE_TZ = ZoneInfo("America/Santiago")
@@ -113,6 +109,14 @@ def preparar_datos_transaccion(datos, tipo):
     datos_preparados = dict(datos)
     datos_preparados["monto"] = to_int(datos_preparados.get("monto", 0), default=0)
     datos_preparados["tipo"] = tipo
+
+    # Actualizar porcentajes desde la hoja actual si es posible
+    try:
+        sheet = get_sheet()
+        leer_pcts_desde_hoja(sheet)
+    except Exception:
+        pass
+
     datos_preparados["monto_deuda"] = calcular_monto_deuda(
         monto_num=datos_preparados["monto"],
         pagador=datos_preparados.get("pagador"),
@@ -121,17 +125,25 @@ def preparar_datos_transaccion(datos, tipo):
     return datos_preparados
 
 def texto_deuda_para_destinatario(to_number, datos):
-    """Devuelve 'Te deben' o 'Tú debes' según quién recibe el mensaje."""
+    """Devuelve el texto de deuda para destinatario (emisor o pareja)."""
     destinatario = nombre_por_numero(to_number)
     pagador = datos.get("pagador")
     monto_deuda = to_int(datos.get("monto_deuda", 0), default=0)
+    monto = to_int(datos.get("monto", 0), default=0)
 
+    # Si el destinatario es quien pagó
     if destinatario == pagador:
-        return f"Te deben ${format_number_dot(monto_deuda)}"
+        # "Tú pagaste" y luego "Te deben" con el monto de deuda
+        return (
+            f"Tú pagaste ${format_number_dot(monto)}\n"
+            f"Te deben ${format_number_dot(monto_deuda)}"
+        )
 
+    # Si el destinatario es la otra persona (Manu o Cami)
     if destinatario in ("Manu", "Cami"):
         return f"Tú debes ${format_number_dot(monto_deuda)}"
 
+    # Caso genérico (otros destinatarios)
     return f"Saldo ${format_number_dot(monto_deuda)}"
 
 def send_meta_message(to_number, message):
@@ -224,7 +236,7 @@ def enviar_botones_pagador(from_number, categoria):
             "interactive": {
                 "type": "button",
                 "body": {
-                    "text": f"✅ Categoría: {categoria}\n💳 ¿Quién pagó?"
+                    "text": f"✅ Categoría: {categoria}\n💳 ¿Quién pagó?\n*Escribe Cancelar para detener el proceso*"
                 },
                 "action": {
                     "buttons": [
@@ -249,9 +261,23 @@ def enviar_botones_pagador(from_number, categoria):
         import traceback
         traceback.print_exc()
 
-def enviar_tipo_division(from_number):
-    """Envía botones interactivos para elegir tipo de división."""
+def _pct_label_from_sheet():
+    """Devuelve la etiqueta actual de división, p. ej. '65%/35%'. Actualiza PCT_MANU/PCT_CAMI desde la hoja si es posible."""
     try:
+        sheet = get_sheet()
+        leer_pcts_desde_hoja(sheet)
+    except Exception as e:
+        print(f"⚠️ No se pudieron leer PCT desde hoja: {e}")
+    # Formato: Manu% / Cami%
+    manu_pct = int(round(PCT_MANU * 100))
+    cami_pct = int(round(PCT_CAMI * 100))
+    return f"{manu_pct}%/{cami_pct}%"
+
+def enviar_tipo_division(from_number):
+    """Envía botones interactivos para elegir tipo de división (dinámico)."""
+    try:
+        label_pct = _pct_label_from_sheet()
+
         interactive_payload = {
             "messaging_product": "whatsapp",
             "to": _norm_num(from_number),
@@ -263,7 +289,7 @@ def enviar_tipo_division(from_number):
                 },
                 "action": {
                     "buttons": [
-                        {"type": "reply", "reply": {"id": "tipo_pct", "title": "57%/43%"}},
+                        {"type": "reply", "reply": {"id": "tipo_pct", "title": label_pct}},
                         {"type": "reply", "reply": {"id": "tipo_50", "title": "50/50"}},
                         {"type": "reply", "reply": {"id": "tipo_100", "title": "100%"}}
                     ]
@@ -278,7 +304,7 @@ def enviar_tipo_division(from_number):
         }
 
         resp = requests.post(url, headers=headers, json=interactive_payload, timeout=30)
-        print("DEBUG tipo división:", resp.json())
+        print("DEBUG tipo división (dinámico):", resp.json())
 
     except Exception as e:
         print(f"❌ ERROR enviando tipo de división: {e}")
@@ -328,6 +354,36 @@ def enviar_template(to_number, datos, template_name="expense_notification_v1"):
         import traceback
         traceback.print_exc()
         return {"error": str(e)}
+
+def _parse_pct_cell(cell_value, default=None):
+    """Parsea un valor de celda que puede ser '0.61' o '61%'. Devuelve float o None."""
+    if cell_value is None:
+        return None
+    s = str(cell_value).strip()
+    try:
+        if s.endswith("%"):
+            s = s.rstrip("%")
+            return float(s) / 100.0
+        return float(s)
+    except Exception:
+        return None
+
+def leer_pcts_desde_hoja(sheet):
+    """Lee D3 (Manu) y D4 (Cami) y actualiza PCT_MANU/PCT_CAMI si son válidos."""
+    global PCT_MANU, PCT_CAMI
+    try:
+        manu_val = sheet.acell("D3").value
+        cami_val = sheet.acell("D4").value
+
+        manu_parsed = _parse_pct_cell(manu_val, default=None)
+        cami_parsed = _parse_pct_cell(cami_val, default=None)
+
+        if manu_parsed is not None:
+            PCT_MANU = float(manu_parsed)
+        if cami_parsed is not None:
+            PCT_CAMI = float(cami_parsed)
+    except Exception as e:
+        print(f"⚠️ No se pudieron leer PCT desde hoja: {e}")
 
 def get_sheet():
     """Conecta con Google Sheets y asegura que exista la hoja del mes actual.
@@ -438,10 +494,30 @@ def notificar_pareja(from_number, datos):
 
     enviar_template(notificar_a, datos, template_name="expense_notification_v1")
 
-# Resto del archivo permanece igual
+def is_cancelar(texto):
+    """Detecta si el usuario escribió 'Cancelar' (case-insensitive)."""
+    if texto is None:
+        return False
+    return str(texto).strip().lower() == "cancelar"
+
+def cancelar_proceso(from_number):
+    """Cancela el proceso en curso para un usuario y notifica la cancelación."""
+    if from_number in conversaciones:
+        del conversaciones[from_number]
+    # Confirmación de cancelación
+    send_meta_message(
+        from_number,
+        "*Cancelación realizada.* Se detuvo el proceso de registro. Si quieres iniciar otro gasto, escribe: Tienda, Monto"
+    )
+
 def procesar_mensaje(from_number, mensaje):
     """Procesa mensajes."""
     try:
+        # Detección de cancelación en cualquier punto
+        if is_cancelar(mensaje):
+            cancelar_proceso(from_number)
+            return
+
         if from_number in conversaciones:
             estado = conversaciones[from_number].get("estado")
 
@@ -504,12 +580,20 @@ def procesar_nuevo_gasto(from_number, mensaje):
 def manejar_categoria(from_number, respuesta):
     """Maneja selección de categoría desde lista interactiva."""
     try:
+        # Detección de Cancelar en cualquier punto de la categoría
+        if is_cancelar(respuesta):
+            cancelar_proceso(from_number)
+            return
+
         datos = conversaciones[from_number]
         categorias = datos["categorias"]
 
         categoria = respuesta.strip()
         if categoria not in categorias:
-            send_meta_message(from_number, "❌ Categoría no válida. Intenta de nuevo usando la lista.")
+            send_meta_message(
+                from_number,
+                "❌ Categoría no válida. Intenta de nuevo usando la lista\n*Escribe Cancelar para detener el proceso*"
+            )
             return
 
         conversaciones[from_number]["categoria"] = categoria
@@ -530,7 +614,10 @@ def manejar_pagador(from_number, respuesta):
         elif respuesta.lower() in ["2", "cami", "camila"]:
             pagador = "Cami"
         else:
-            send_meta_message(from_number, "❌ Opción no válida. Responde 1 o 2")
+            send_meta_message(
+                from_number,
+                "❌ Opción no válida. Responde 1 o 2\n*Escribe Cancelar para detener el proceso*"
+            )
             return
 
         conversaciones[from_number]["pagador"] = pagador
@@ -555,7 +642,10 @@ def manejar_tipo_division(from_number, respuesta):
         elif respuesta.lower() in ["3", "%", "porcentaje", "pct"]:
             tipo = "%"
         else:
-            send_meta_message(from_number, "❌ Opción no válida. Responde 1, 2 o 3")
+            send_meta_message(
+                from_number,
+                "❌ Opción no válida. Responde 1, 2 o 3\n*Escribe Cancelar para detener el proceso*"
+            )
             return
 
         # Enviar plantilla al emisor tan pronto como tengamos los datos
