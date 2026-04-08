@@ -29,11 +29,11 @@ NUMERO_CAMI = os.getenv("NUMERO_CAMI")
 
 # Porcentajes para división %
 try:
-    PCT_MANU = float(os.getenv("PCT_MANU", "0.57"))
-    PCT_CAMI = float(os.getenv("PCT_CAMI", "0.43"))
+    PCT_MANU = float(os.getenv("PCT_MANU", "0.61"))
+    PCT_CAMI = float(os.getenv("PCT_CAMI", "0.39"))
 except Exception:
-    PCT_MANU = 0.57
-    PCT_CAMI = 0.43
+    PCT_MANU = 0.61
+    PCT_CAMI = 0.31
 
 # TimeZone
 CHILE_TZ = ZoneInfo("America/Santiago")
