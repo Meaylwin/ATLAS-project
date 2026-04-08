@@ -569,7 +569,8 @@ def procesar_nuevo_gasto(from_number, mensaje):
                 from_number,
                 "❌ Formato incorrecto\n\n"
                 "💡 Escribe: *Tienda, Monto*\n\n"
-                "Ejemplos:\n• Jumbo, 18990\n• Jumbo, 18.990"
+                "Ejemplos:\n• Jumbo, 18990\n• Jumbo, 18.990\n\n"
+                "*⚠️Escribe Cancelar para detener el proceso⚠️*"
             )
 
     except Exception as e:
@@ -592,7 +593,7 @@ def manejar_categoria(from_number, respuesta):
         if categoria not in categorias:
             send_meta_message(
                 from_number,
-                "❌ Categoría no válida. Intenta de nuevo usando la lista\n*Escribe Cancelar para detener el proceso*"
+                "❌ Categoría no válida. Intenta de nuevo usando la lista\n*⚠️Escribe Cancelar para detener el proceso⚠️*"
             )
             return
 
@@ -616,7 +617,7 @@ def manejar_pagador(from_number, respuesta):
         else:
             send_meta_message(
                 from_number,
-                "❌ Opción no válida. Responde 1 o 2\n*Escribe Cancelar para detener el proceso*"
+                "❌ Opción no válida. Responde 1 o 2\n*⚠️Escribe Cancelar para detener el proceso⚠️*"
             )
             return
 
@@ -644,7 +645,7 @@ def manejar_tipo_division(from_number, respuesta):
         else:
             send_meta_message(
                 from_number,
-                "❌ Opción no válida. Responde 1, 2 o 3\n*Escribe Cancelar para detener el proceso*"
+                "❌ Opción no válida. Responde 1, 2 o 3\n*⚠️Escribe Cancelar para detener el proceso⚠️*"
             )
             return
 
