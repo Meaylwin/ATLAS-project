@@ -197,7 +197,7 @@ def enviar_lista_categorias(from_number, tienda, monto):
                     "text": (
                         f"💰 {tienda}\n"
                         f"💵 ${format_number_dot(monto)}\n\n"
-                        f"📂 ¿En qué categoría?"
+                        f"📂 ¿En qué categoría?\n\n*⚠️Escribe Cancelar para detener el proceso⚠️*"
                     )
                 },
                 "action": {
@@ -236,7 +236,7 @@ def enviar_botones_pagador(from_number, categoria):
             "interactive": {
                 "type": "button",
                 "body": {
-                    "text": f"✅ Categoría: {categoria}\n💳 ¿Quién pagó?\n*Escribe Cancelar para detener el proceso*"
+                    "text": f"✅ Categoría: {categoria}\n💳 ¿Quién pagó?"
                 },
                 "action": {
                     "buttons": [
