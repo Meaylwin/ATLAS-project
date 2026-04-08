@@ -551,7 +551,7 @@ def procesar_nuevo_gasto(from_number, mensaje):
                     from_number,
                     "❌ Monto inválido\n\n"
                     "💡 Escribe: *Tienda, Monto*\n\n"
-                    "Ejemplos:\n• Jumbo, 18990\n• Jumbo, 18.990"
+                    "Ejemplos:\n• Lider, 18990\n• Lider, 18.990"
                 )
                 return
 
@@ -569,8 +569,7 @@ def procesar_nuevo_gasto(from_number, mensaje):
                 from_number,
                 "❌ Formato incorrecto\n\n"
                 "💡 Escribe: *Tienda, Monto*\n\n"
-                "Ejemplos:\n• Jumbo, 18990\n• Jumbo, 18.990\n\n"
-                "*⚠️Escribe Cancelar para detener el proceso⚠️*"
+                "Ejemplos:\n• Lider, 18990\n• Lider, 18.990\n\n"
             )
 
     except Exception as e:
