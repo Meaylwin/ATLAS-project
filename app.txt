@@ -70,6 +70,7 @@ def to_int(n, default=0):
 
         s = str(n).strip()
         s = s.replace(" ", "")
+        s = s.replace("$", "")
         s = s.replace(".", "")
         s = s.replace(",", "")
         return int(float(s))
@@ -126,25 +127,24 @@ def preparar_datos_transaccion(datos, tipo):
     return datos_preparados
 
 def texto_deuda_para_destinatario(to_number, datos):
-    """Devuelve el texto de deuda para destinatario (emisor o pareja)."""
+    """Devuelve el texto de deuda para destinatario en una sola línea."""
     destinatario = nombre_por_numero(to_number)
     pagador = datos.get("pagador")
     monto_deuda = to_int(datos.get("monto_deuda", 0), default=0)
     monto = to_int(datos.get("monto", 0), default=0)
 
+    # Lo que realmente termina pagando quien pagó, después de lo que le deben
+    monto_neto_pagador = max(0, monto - monto_deuda)
+
     # Si el destinatario es quien pagó
     if destinatario == pagador:
-        # "Tú pagaste" y luego "Te deben" con el monto de deuda
-        return (
-            f"Tú pagaste ${format_number_dot(monto)}\n"
-            f"Te deben ${format_number_dot(monto_deuda)}"
-        )
+        return f"Tu gasto final ${format_number_dot(monto_neto_pagador)} \n Te deben ${format_number_dot(monto_deuda)}"
 
     # Si el destinatario es la otra persona (Manu o Cami)
     if destinatario in ("Manu", "Cami"):
         return f"Tú debes ${format_number_dot(monto_deuda)}"
 
-    # Caso genérico (otros destinatarios)
+    # Caso genérico
     return f"Saldo ${format_number_dot(monto_deuda)}"
 
 def send_meta_message(to_number, message):
@@ -335,14 +335,36 @@ def enviar_template(to_number, datos, template_name="expense_notification_v1"):
 
     try:
         resp = requests.post(url, headers=headers, json=payload, timeout=30)
-        data = resp.json()
-        print("DEBUG: Plantilla enviada. Respuesta API:", data)
-        return data
+
+        try:
+            data = resp.json()
+        except Exception:
+            data = {"raw_text": resp.text}
+
+        print(f"DEBUG TEMPLATE status={resp.status_code} response={data}")
+
+        if resp.status_code >= 400 or "error" in data:
+            print("❌ ERROR enviando template:", data)
+            return {
+                "ok": False,
+                "status_code": resp.status_code,
+                "data": data
+            }
+
+        return {
+            "ok": True,
+            "status_code": resp.status_code,
+            "data": data
+        }
+
     except Exception as e:
         print(f"❌ ERROR enviando plantilla: {e}")
         import traceback
         traceback.print_exc()
-        return {"error": str(e)}
+        return {
+            "ok": False,
+            "error": str(e)
+        }
 
 def _parse_pct_cell(cell_value, default=None):
     """Parsea un valor de celda que puede ser '0.61' o '61%'. Devuelve float o None."""
@@ -512,8 +534,9 @@ def notificar_pareja(from_number, datos):
     if "tipo" not in datos or "monto_deuda" not in datos:
         datos = preparar_datos_transaccion(datos, datos.get("tipo", ""))
 
-    enviar_template(notificar_a, datos, template_name="expense_notification_v1")
-
+    resultado = enviar_template(notificar_a, datos, template_name="expense_notification_v1")
+    if not resultado.get("ok"):
+        print("❌ Falló template a la pareja:", resultado)
 def is_cancelar(texto):
     """Detecta si el usuario escribió 'Cancelar' (case-insensitive)."""
     if texto is None:
@@ -558,7 +581,7 @@ def procesar_mensaje(from_number, mensaje):
 def procesar_nuevo_gasto(from_number, mensaje):
     """Procesa nuevo gasto."""
     try:
-        pattern = r'^(.+?),\s*([\d\.,]+)$'
+        pattern = r'^(.+?),\s*(\$?\s*[\d\.,]+)$'
         match = re.match(pattern, mensaje.strip())
 
         if match:
@@ -571,7 +594,7 @@ def procesar_nuevo_gasto(from_number, mensaje):
                     from_number,
                     "❌ Monto inválido\n\n"
                     "💡 Escribe: *Tienda, Monto*\n\n"
-                    "Ejemplos:\n• Lider, 18990\n• Lider, 18.990"
+                    "Ejemplos:\n• Lider, 18990\n• Lider, 18.990\n• Lider, $18.990"
                 )
                 return
 
@@ -592,7 +615,7 @@ def procesar_nuevo_gasto(from_number, mensaje):
                 from_number,
                 "❌ Formato incorrecto\n\n"
                 "💡 Escribe: *Tienda, Monto*\n\n"
-                "Ejemplos:\n• Lider, 18990\n• Lider, 18.990\n\n"
+                "Ejemplos:\n• Lider, 18990\n• Lider, 18.990\n• Lider, $18.990"
             )
 
     except Exception as e:
@@ -674,7 +697,19 @@ def manejar_tipo_division(from_number, respuesta):
         # Enviar plantilla al emisor tan pronto como tengamos los datos
         datos_preparados = preparar_datos_transaccion(datos, tipo)
         try:
-            enviar_template(from_number, datos_preparados, template_name="expense_notification_v1")
+            resultado_template = enviar_template(
+                from_number,
+                datos_preparados,
+                template_name="expense_notification_v1"
+            )
+
+            if not resultado_template.get("ok"):
+                print("❌ Falló template al emisor:", resultado_template)
+                send_meta_message(
+                    from_number,
+                    "⚠️ Se registró el gasto, pero no pude enviar la notificación final por template."
+                )
+
         except Exception as e:
             print(f"❌ ERROR enviando plantilla: {e}")
             import traceback
