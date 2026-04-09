@@ -30,6 +30,7 @@ NUMERO_CAMI = os.getenv("NUMERO_CAMI")
 # Porcentajes para división %
 PCT_MANU = 0.61
 PCT_CAMI = 0.39
+PCTS_CARGADOS = False
 
 # TimeZone
 CHILE_TZ = ZoneInfo("America/Santiago")
@@ -110,10 +111,10 @@ def preparar_datos_transaccion(datos, tipo):
     datos_preparados["monto"] = to_int(datos_preparados.get("monto", 0), default=0)
     datos_preparados["tipo"] = tipo
 
-    # Actualizar porcentajes desde la hoja actual si es posible
+    # Actualizar porcentajes desde la hoja actual si es necesario
     try:
-        sheet = get_sheet()
-        leer_pcts_desde_hoja(sheet)
+        if not PCTS_CARGADOS:
+            actualizar_pcts_desde_sheets()
     except Exception:
         pass
 
@@ -261,22 +262,10 @@ def enviar_botones_pagador(from_number, categoria):
         import traceback
         traceback.print_exc()
 
-def _pct_label_from_sheet():
-    """Devuelve la etiqueta actual de división, p. ej. '65%/35%'. Actualiza PCT_MANU/PCT_CAMI desde la hoja si es posible."""
-    try:
-        sheet = get_sheet()
-        leer_pcts_desde_hoja(sheet)
-    except Exception as e:
-        print(f"⚠️ No se pudieron leer PCT desde hoja: {e}")
-    # Formato: Manu% / Cami%
-    manu_pct = int(round(PCT_MANU * 100))
-    cami_pct = int(round(PCT_CAMI * 100))
-    return f"{manu_pct}%/{cami_pct}%"
-
 def enviar_tipo_division(from_number):
     """Envía botones interactivos para elegir tipo de división (dinámico)."""
     try:
-        label_pct = _pct_label_from_sheet()
+        label_pct = _pct_label_actual()
 
         interactive_payload = {
             "messaging_product": "whatsapp",
@@ -384,6 +373,37 @@ def leer_pcts_desde_hoja(sheet):
             PCT_CAMI = float(cami_parsed)
     except Exception as e:
         print(f"⚠️ No se pudieron leer PCT desde hoja: {e}")
+
+def _pct_label_actual():
+    """Devuelve la etiqueta actual de división usando los PCT ya cargados."""
+    try:
+        if not PCTS_CARGADOS:
+            actualizar_pcts_desde_sheets()
+    except Exception:
+        pass
+
+    manu_pct = int(round(PCT_MANU * 100))
+    cami_pct = int(round(PCT_CAMI * 100))
+    return f"{manu_pct}%/{cami_pct}%"
+
+def actualizar_pcts_desde_sheets():
+    """Consulta Google Sheets y actualiza PCT_MANU / PCT_CAMI."""
+    global PCTS_CARGADOS
+    try:
+        sheet = get_sheet()
+        leer_pcts_desde_hoja(sheet)
+        PCTS_CARGADOS = True
+        print(f"✅ PCT actualizados desde Sheets: Manu={PCT_MANU}, Cami={PCT_CAMI}")
+    except Exception as e:
+        print(f"⚠️ No se pudieron actualizar PCT desde Sheets: {e}")
+
+def precargar_pcts_en_background():
+    """Precarga D3 y D4 en segundo plano para reducir latencia percibida."""
+    try:
+        t = threading.Thread(target=actualizar_pcts_desde_sheets, daemon=True)
+        t.start()
+    except Exception as e:
+        print(f"⚠️ No se pudo iniciar precarga de PCT: {e}")
 
 def get_sheet():
     """Conecta con Google Sheets y asegura que exista la hoja del mes actual.
@@ -561,6 +581,9 @@ def procesar_nuevo_gasto(from_number, mensaje):
                 "estado": "esperando_categoria",
                 "categorias": CATEGORIAS_FIJAS,
             }
+
+            # Precargar porcentajes mientras el usuario elige categoría
+            precargar_pcts_en_background()
 
             enviar_lista_categorias(from_number, tienda, monto)
 
