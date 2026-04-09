@@ -138,7 +138,7 @@ def texto_deuda_para_destinatario(to_number, datos):
 
     # Si el destinatario es quien pagó
     if destinatario == pagador:
-        return f"Tu gasto final ${format_number_dot(monto_neto_pagador)} \n Te deben ${format_number_dot(monto_deuda)}"
+        return f"Tu gasto final ${format_number_dot(monto_neto_pagador)} • Te deben ${format_number_dot(monto_deuda)}"
 
     # Si el destinatario es la otra persona (Manu o Cami)
     if destinatario in ("Manu", "Cami"):
