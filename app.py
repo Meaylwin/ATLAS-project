@@ -42,7 +42,7 @@ conversaciones = {}
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1E0eBDiwr6AmnuX04K-Q_Zw7PIvlSJPnBi4Vn9ggaPlc/edit?gid=559988184"
 
 # Categorías
-CATEGORIAS_FIJAS = ["Hogar", "Alimentos", "Compras", "Deporte", "Otros"]
+CATEGORIAS_FIJAS = ["Hogar", "Alimentos", "Compras", "Deporte", "Limpieza", "Otros"]
 
 # Nombre de hoja: siempre usar el mes actual
 MESES_ES = [
@@ -181,11 +181,11 @@ def enviar_lista_categorias(from_number, tienda, monto):
     """Envía una lista interactiva de categorías."""
     try:
         rows = [
-            {"id": "cat_Hogar", "title": "Hogar"},
-            {"id": "cat_Alimentos", "title": "Alimentos"},
-            {"id": "cat_Compras", "title": "Compras"},
-            {"id": "cat_Deporte", "title": "Deporte"},
-            {"id": "cat_Otros", "title": "Otros"},
+            {
+                "id": f"cat_{categoria}",
+                "title": categoria
+            }
+            for categoria in CATEGORIAS_FIJAS
         ]
 
         interactive_payload = {
@@ -880,11 +880,8 @@ def webhook():
                                 list_id = interactive.get("list_reply", {}).get("id")
 
                                 mapping_categorias = {
-                                    "cat_Hogar": "Hogar",
-                                    "cat_Alimentos": "Alimentos",
-                                    "cat_Compras": "Compras",
-                                    "cat_Deporte": "Deporte",
-                                    "cat_Otros": "Otros",
+                                    f"cat_{categoria}": categoria
+                                    for categoria in CATEGORIAS_FIJAS
                                 }
 
                                 if list_id in mapping_categorias:
