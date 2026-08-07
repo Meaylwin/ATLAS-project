@@ -49,7 +49,9 @@ MESES_ES = [
     "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
     "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
 ]
-SHEET_NAME = f"F. {MESES_ES[datetime.now().month - 1]}"
+def get_sheet_name():
+    ahora = datetime.now(CHILE_TZ)
+    return f"F. {MESES_ES[ahora.month - 1]}"
 
 def _norm_num(n):
     return re.sub(r"\D", "", str(n or ""))
@@ -318,7 +320,7 @@ def enviar_template(to_number, datos, template_name="expense_notification_v1"):
             {"type": "text", "text": datos.get("pagador", "")},
             {"type": "text", "text": datos.get("tipo", "")},
             {"type": "text", "text": texto_deuda},
-            {"type": "text", "text": SHEET_NAME}
+            {"type": "text", "text": get_sheet_name()}
         ]}
     ]
 
@@ -428,6 +430,7 @@ def precargar_pcts_en_background():
         print(f"⚠️ No se pudo iniciar precarga de PCT: {e}")
 
 def get_sheet():
+    sheet_name = get_sheet_name()
     """Conecta con Google Sheets y asegura que exista la hoja del mes actual.
     Si no existe, la crea duplicando la hoja de plantilla 'F. Template'."""
     spreadsheet_id = os.getenv("SPREADSHEET_ID")
@@ -443,7 +446,7 @@ def get_sheet():
     spreadsheet = client.open_by_key(spreadsheet_id)
 
     try:
-        sheet = spreadsheet.worksheet(SHEET_NAME)
+        sheet = spreadsheet.worksheet(sheet_name)
         return sheet
     except WorksheetNotFound:
         try:
@@ -455,14 +458,14 @@ def get_sheet():
                     {
                         "duplicateSheet": {
                             "sourceSheetId": source_sheet_id,
-                            "newSheetName": SHEET_NAME
+                            "newSheetName": sheet_name
                         }
                     }
                 ]
             }
 
             spreadsheet.batch_update(body)
-            sheet = spreadsheet.worksheet(SHEET_NAME)
+            sheet = spreadsheet.worksheet(sheet_name)
             print(f"✅ Hoja '{SHEET_NAME}' creada a partir de 'F. Template'.")
             return sheet
         except Exception as e:
@@ -912,14 +915,14 @@ def home():
     return f"""
     <h1>🤖 ATLAS Bot - Finanzas C&M</h1>
     <p>✅ Bot activo con Meta Cloud API</p>
-    <p>📊 Hoja actual: {SHEET_NAME}</p>
+    <p>📊 Hoja actual: {get_sheet_name()}</p>
     """
 
 @app.route("/health")
 def health():
     return jsonify({
         "status": "ok",
-        "sheet": SHEET_NAME,
+        "sheet": get_sheet_name(),
         "conversaciones": len(conversaciones)
     }), 200
 
