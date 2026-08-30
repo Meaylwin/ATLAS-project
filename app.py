@@ -369,10 +369,12 @@ def enviar_template(to_number, datos, template_name="expense_notification_v1"):
         }
 
 def _parse_pct_cell(cell_value, default=None):
-    """Parsea un valor de celda que puede ser '0.61' o '61%'. Devuelve float o None."""
+    """Parsea un valor de celda que puede ser '0.61', '0,61' o '61%'. Devuelve float o None."""
     if cell_value is None:
         return None
     s = str(cell_value).strip()
+    # Normalizar separador decimal (locale chileno/español usa coma)
+    s = s.replace(",", ".")
     try:
         if s.endswith("%"):
             s = s.rstrip("%")
@@ -393,10 +395,17 @@ def leer_pcts_desde_hoja(sheet):
 
         if manu_parsed is not None:
             PCT_MANU = float(manu_parsed)
+        else:
+            print(f"⚠️ D3 no parseable: '{manu_val}' — se mantiene PCT_MANU={PCT_MANU}")
         if cami_parsed is not None:
             PCT_CAMI = float(cami_parsed)
+        else:
+            print(f"⚠️ D4 no parseable: '{cami_val}' — se mantiene PCT_CAMI={PCT_CAMI}")
+
+        return manu_parsed is not None and cami_parsed is not None
     except Exception as e:
         print(f"⚠️ No se pudieron leer PCT desde hoja: {e}")
+        return False
 
 def _pct_label_actual():
     """Devuelve la etiqueta actual de división usando los PCT ya cargados."""
@@ -415,9 +424,12 @@ def actualizar_pcts_desde_sheets():
     global PCTS_CARGADOS
     try:
         sheet = get_sheet()
-        leer_pcts_desde_hoja(sheet)
-        PCTS_CARGADOS = True
-        print(f"✅ PCT actualizados desde Sheets: Manu={PCT_MANU}, Cami={PCT_CAMI}")
+        ok = leer_pcts_desde_hoja(sheet)
+        if ok:
+            PCTS_CARGADOS = True
+            print(f"✅ PCT actualizados desde Sheets: Manu={PCT_MANU}, Cami={PCT_CAMI}")
+        else:
+            print(f"⚠️ PCT no actualizados (valores no parseables). Usando: Manu={PCT_MANU}, Cami={PCT_CAMI}")
     except Exception as e:
         print(f"⚠️ No se pudieron actualizar PCT desde Sheets: {e}")
 
@@ -479,42 +491,50 @@ def get_sheet():
         traceback.print_exc()
         raise
 
-def encontrar_ultima_fila_categoria(categoria):
-    """Determina la próxima fila disponible para una categoría dada."""
+def encontrar_fila_total_categoria(categoria):
+    """Devuelve la fila donde está 'Total' en columna C para la categoría dada.
+    La nueva transacción se insertará en esa posición, empujando 'Total' hacia abajo."""
     try:
         sheet = get_sheet()
 
+        # Buscar cabecera de la categoría en columna B
         cell = sheet.find(categoria, in_column=2)
         if not cell:
-            return len(sheet.col_values(1)) + 1
+            return None, sheet
 
         cabecera_fila = cell.row
 
+        # Buscar la siguiente cabecera de categoría en columna B (límite de búsqueda)
         col_b = sheet.col_values(2)
-        proxima_cabecera_fila = None
+        proxima_cabecera_fila = len(col_b) + 2
         for r in range(cabecera_fila + 1, len(col_b) + 1):
             val_b = col_b[r - 1].strip() if r - 1 < len(col_b) else ""
             if val_b in CATEGORIAS_FIJAS:
                 proxima_cabecera_fila = r
                 break
 
-        if not proxima_cabecera_fila:
-            proxima_cabecera_fila = len(sheet.col_values(3)) + 1
-
+        # Buscar "Total" en columna C dentro de la sección de la categoría
         col_c = sheet.col_values(3)
+        for r in range(cabecera_fila + 1, proxima_cabecera_fila):
+            valor_c = col_c[r - 1].strip() if r - 1 < len(col_c) else ""
+            if valor_c.lower() == "total":
+                print(f"✅ Fila 'Total' encontrada en fila {r} para categoría '{categoria}'")
+                return r, sheet
+
+        # Fallback: no hay Total, buscar última fila con datos + 1
+        print(f"⚠️ No se encontró 'Total' para '{categoria}'. Usando fallback.")
         ultima_fila_con_datos = cabecera_fila
         for r in range(cabecera_fila + 1, proxima_cabecera_fila):
             valor_c = col_c[r - 1].strip() if r - 1 < len(col_c) else ""
             if valor_c:
                 ultima_fila_con_datos = r
-
-        return ultima_fila_con_datos + 1
+        return ultima_fila_con_datos + 1, sheet
 
     except Exception as e:
         print(f"❌ ERROR al determinar fila de categoría: {e}")
         import traceback
         traceback.print_exc()
-        return 31
+        return None, None
 
 def notificar_pareja(from_number, datos):
     """Notifica a la pareja cuando alguien registra un gasto."""
@@ -806,8 +826,10 @@ def asegurar_fila_vacia_debajo(sheet, fila, force=False):
 
 def _guardar_transaccion_en_sheets(from_number, datos, fecha):
     try:
-        sheet = get_sheet()
-        fila = encontrar_ultima_fila_categoria(datos["categoria"])
+        fila, sheet = encontrar_fila_total_categoria(datos["categoria"])
+
+        if fila is None or sheet is None:
+            raise ValueError(f"No se pudo determinar la fila para categoría '{datos['categoria']}'")
 
         nueva_fila = [
             "",               # A
@@ -819,8 +841,14 @@ def _guardar_transaccion_en_sheets(from_number, datos, fecha):
             datos["tipo"]     # G
         ]
 
-        sheet.update(f"A{fila}:G{fila}", [nueva_fila], value_input_option="USER_ENTERED")
-        asegurar_fila_vacia_debajo(sheet, fila, force=(datos["categoria"] == "Otros"))
+        # Insertar fila nueva antes del "Total", empujando Total hacia abajo
+        sheet.insert_rows([nueva_fila], row=fila, value_input_option="USER_ENTERED")
+
+        # Copiar formato de la fila anterior (última transacción existente)
+        try:
+            copiar_formato_fila(sheet, fila_origen=fila - 1, fila_destino=fila, col_end=8)
+        except Exception as e:
+            print(f"⚠️ No se pudo copiar formato: {e}")
 
         # Notificar a la pareja solo si Sheets guardó OK
         notificar_pareja(from_number, datos)
