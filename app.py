@@ -824,6 +824,42 @@ def asegurar_fila_vacia_debajo(sheet, fila, force=False):
 
     return True
 
+def actualizar_formula_total(sheet, fila_insertada, col="D"):
+    """Expande la fórmula SUM del Total para incluir la fila recién insertada.
+    Después del insert_rows, Total quedó en fila_insertada+1; la nueva fila
+    es fila_insertada, que puede quedar fuera del rango original del SUM."""
+    try:
+        fila_total = fila_insertada + 1
+        celda_total = f"{col}{fila_total}"
+
+        formula = sheet.acell(celda_total, value_render_option="FORMULA").value
+        if not formula:
+            print(f"⚠️ Celda {celda_total} vacía, no hay fórmula que actualizar.")
+            return
+
+        match = re.search(r'SUM\(([A-Z]+)(\d+):([A-Z]+)(\d+)\)', formula, re.IGNORECASE)
+        if not match:
+            print(f"⚠️ No se encontró SUM en {celda_total}: '{formula}'")
+            return
+
+        col_inicio, fila_inicio = match.group(1), match.group(2)
+        col_fin, fila_fin_actual = match.group(3), int(match.group(4))
+
+        # La nueva fila debe ser el nuevo fin del rango
+        if fila_insertada > fila_fin_actual:
+            nueva_formula = formula[:match.start()] + \
+                f"SUM({col_inicio}{fila_inicio}:{col_fin}{fila_insertada})" + \
+                formula[match.end():]
+            sheet.update([[nueva_formula]], f"{celda_total}", value_input_option="USER_ENTERED")
+            print(f"✅ Fórmula Total actualizada: {formula} → {nueva_formula}")
+        else:
+            print(f"ℹ️ Fórmula Total ya cubre la fila {fila_insertada}: {formula}")
+
+    except Exception as e:
+        print(f"⚠️ No se pudo actualizar fórmula Total: {e}")
+        import traceback
+        traceback.print_exc()
+
 def _guardar_transaccion_en_sheets(from_number, datos, fecha):
     try:
         fila, sheet = encontrar_fila_total_categoria(datos["categoria"])
@@ -849,6 +885,12 @@ def _guardar_transaccion_en_sheets(from_number, datos, fecha):
             copiar_formato_fila(sheet, fila_origen=fila - 1, fila_destino=fila, col_end=8)
         except Exception as e:
             print(f"⚠️ No se pudo copiar formato: {e}")
+
+        # Expandir fórmula SUM del Total para incluir la nueva fila
+        try:
+            actualizar_formula_total(sheet, fila_insertada=fila)
+        except Exception as e:
+            print(f"⚠️ No se pudo actualizar fórmula Total: {e}")
 
         # Notificar a la pareja solo si Sheets guardó OK
         notificar_pareja(from_number, datos)
