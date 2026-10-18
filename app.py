@@ -510,14 +510,14 @@ def encontrar_fila_total_categoria(categoria):
 
     fila_cabecera = cell.row
     col_b = sheet.col_values(2)
-    siguiente_cabecera = len(col_b) + 1
+    col_c = sheet.col_values(3)
+    siguiente_cabecera = max(len(col_b), len(col_c)) + 1
 
     for fila in range(fila_cabecera + 1, len(col_b) + 1):
         if col_b[fila - 1].strip() in CATEGORIAS_FIJAS:
             siguiente_cabecera = fila
             break
 
-    col_c = sheet.col_values(3)
     for fila in range(fila_cabecera + 1, siguiente_cabecera):
         if col_c[fila - 1].strip().lower() == "total":
             return fila, fila_cabecera
