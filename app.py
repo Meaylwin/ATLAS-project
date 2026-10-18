@@ -500,42 +500,29 @@ def get_sheet():
         SHEETS_CACHE[sheet_name] = sheet
         return sheet
 
-def encontrar_ultima_fila_categoria(categoria):
-    """Determina la próxima fila disponible para una categoría dada."""
-    try:
-        sheet = get_sheet()
+def encontrar_fila_total_categoria(categoria):
+    """Devuelve la fila Total y la cabecera de la categoría."""
+    sheet = get_sheet()
 
-        cell = sheet.find(categoria, in_column=2)
-        if not cell:
-            return len(sheet.col_values(1)) + 1
+    cell = sheet.find(categoria, in_column=2)
+    if not cell:
+        raise ValueError(f"No se encontró la categoría '{categoria}'")
 
-        cabecera_fila = cell.row
+    fila_cabecera = cell.row
+    col_b = sheet.col_values(2)
+    siguiente_cabecera = len(col_b) + 1
 
-        col_b = sheet.col_values(2)
-        proxima_cabecera_fila = None
-        for r in range(cabecera_fila + 1, len(col_b) + 1):
-            val_b = col_b[r - 1].strip() if r - 1 < len(col_b) else ""
-            if val_b in CATEGORIAS_FIJAS:
-                proxima_cabecera_fila = r
-                break
+    for fila in range(fila_cabecera + 1, len(col_b) + 1):
+        if col_b[fila - 1].strip() in CATEGORIAS_FIJAS:
+            siguiente_cabecera = fila
+            break
 
-        if not proxima_cabecera_fila:
-            proxima_cabecera_fila = len(sheet.col_values(3)) + 1
+    col_c = sheet.col_values(3)
+    for fila in range(fila_cabecera + 1, siguiente_cabecera):
+        if col_c[fila - 1].strip().lower() == "total":
+            return fila, fila_cabecera
 
-        col_c = sheet.col_values(3)
-        ultima_fila_con_datos = cabecera_fila
-        for r in range(cabecera_fila + 1, proxima_cabecera_fila):
-            valor_c = col_c[r - 1].strip() if r - 1 < len(col_c) else ""
-            if valor_c:
-                ultima_fila_con_datos = r
-
-        return ultima_fila_con_datos + 1
-
-    except Exception as e:
-        print(f"❌ ERROR al determinar fila de categoría: {e}")
-        import traceback
-        traceback.print_exc()
-        return 31
+    raise ValueError(f"No se encontró la fila Total para '{categoria}'")
 
 def notificar_pareja(from_number, datos):
     """Notifica a la pareja cuando alguien registra un gasto."""
@@ -828,7 +815,7 @@ def asegurar_fila_vacia_debajo(sheet, fila, force=False):
 def _guardar_transaccion_en_sheets(from_number, datos, fecha):
     try:
         sheet = get_sheet()
-        fila = encontrar_ultima_fila_categoria(datos["categoria"])
+        fila_total, fila_cabecera = encontrar_fila_total_categoria(datos["categoria"])
 
         nueva_fila = [
             "",               # A
@@ -840,8 +827,22 @@ def _guardar_transaccion_en_sheets(from_number, datos, fecha):
             datos["tipo"]     # G
         ]
 
-        sheet.update(f"A{fila}:G{fila}", [nueva_fila], value_input_option="USER_ENTERED")
-        asegurar_fila_vacia_debajo(sheet, fila, force=(datos["categoria"] == "Otros"))
+        sheet.insert_rows([nueva_fila], row=fila_total, value_input_option="USER_ENTERED")
+
+        if fila_total - 1 > fila_cabecera:
+            try:
+                copiar_formato_fila(sheet, fila_origen=fila_total - 1, fila_destino=fila_total, col_end=8)
+            except Exception as e:
+                print("⚠️ No se pudo copiar formato:", e)
+
+        total_fila = fila_total + 1
+        primera_fila_suma = fila_cabecera
+        formula_total = f"=SUM(D{primera_fila_suma}:D{fila_total})"
+        sheet.update(
+            f"D{total_fila}",
+            [[formula_total]],
+            value_input_option="USER_ENTERED"
+        )
 
         # Notificar a la pareja solo si Sheets guardó OK
         notificar_pareja(from_number, datos)
