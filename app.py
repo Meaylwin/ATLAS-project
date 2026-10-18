@@ -30,7 +30,10 @@ NUMERO_CAMI = os.getenv("NUMERO_CAMI")
 # Porcentajes para división %
 PCT_MANU = 0.61
 PCT_CAMI = 0.39
-PCTS_CARGADOS = False
+PCTS_CARGADOS_SHEET = None
+SHEETS_CACHE = {}
+SHEETS_CACHE_LOCK = threading.Lock()
+PCTS_CACHE_LOCK = threading.Lock()
 
 # TimeZone
 CHILE_TZ = ZoneInfo("America/Santiago")
@@ -116,7 +119,7 @@ def preparar_datos_transaccion(datos, tipo):
 
     # Actualizar porcentajes desde la hoja actual si es necesario
     try:
-        if not PCTS_CARGADOS:
+        if PCTS_CARGADOS_SHEET != get_sheet_name():
             actualizar_pcts_desde_sheets()
     except Exception:
         pass
@@ -369,12 +372,10 @@ def enviar_template(to_number, datos, template_name="expense_notification_v1"):
         }
 
 def _parse_pct_cell(cell_value, default=None):
-    """Parsea un valor de celda que puede ser '0.61', '0,61' o '61%'. Devuelve float o None."""
+    """Parsea un valor de celda que puede ser '0.61' o '61%'. Devuelve float o None."""
     if cell_value is None:
         return None
     s = str(cell_value).strip()
-    # Normalizar separador decimal (locale chileno/español usa coma)
-    s = s.replace(",", ".")
     try:
         if s.endswith("%"):
             s = s.rstrip("%")
@@ -395,22 +396,15 @@ def leer_pcts_desde_hoja(sheet):
 
         if manu_parsed is not None:
             PCT_MANU = float(manu_parsed)
-        else:
-            print(f"⚠️ D3 no parseable: '{manu_val}' — se mantiene PCT_MANU={PCT_MANU}")
         if cami_parsed is not None:
             PCT_CAMI = float(cami_parsed)
-        else:
-            print(f"⚠️ D4 no parseable: '{cami_val}' — se mantiene PCT_CAMI={PCT_CAMI}")
-
-        return manu_parsed is not None and cami_parsed is not None
     except Exception as e:
         print(f"⚠️ No se pudieron leer PCT desde hoja: {e}")
-        return False
 
 def _pct_label_actual():
     """Devuelve la etiqueta actual de división usando los PCT ya cargados."""
     try:
-        if not PCTS_CARGADOS:
+        if PCTS_CARGADOS_SHEET != get_sheet_name():
             actualizar_pcts_desde_sheets()
     except Exception:
         pass
@@ -420,21 +414,28 @@ def _pct_label_actual():
     return f"{manu_pct}%/{cami_pct}%"
 
 def actualizar_pcts_desde_sheets():
-    """Consulta Google Sheets y actualiza PCT_MANU / PCT_CAMI."""
-    global PCTS_CARGADOS
-    try:
-        sheet = get_sheet()
-        ok = leer_pcts_desde_hoja(sheet)
-        if ok:
-            PCTS_CARGADOS = True
+    """Consulta Google Sheets y actualiza PCT_MANU / PCT_CAMI una vez por mes."""
+    global PCTS_CARGADOS_SHEET
+    sheet_name = get_sheet_name()
+
+    with PCTS_CACHE_LOCK:
+        if PCTS_CARGADOS_SHEET == sheet_name:
+            return
+
+        try:
+            sheet = get_sheet()
+            leer_pcts_desde_hoja(sheet)
+            PCTS_CARGADOS_SHEET = sheet_name
             print(f"✅ PCT actualizados desde Sheets: Manu={PCT_MANU}, Cami={PCT_CAMI}")
-        else:
-            print(f"⚠️ PCT no actualizados (valores no parseables). Usando: Manu={PCT_MANU}, Cami={PCT_CAMI}")
-    except Exception as e:
-        print(f"⚠️ No se pudieron actualizar PCT desde Sheets: {e}")
+        except Exception as e:
+            print(f"⚠️ No se pudieron actualizar PCT desde Sheets: {e}")
+
 
 def precargar_pcts_en_background():
-    """Precarga D3 y D4 en segundo plano para reducir latencia percibida."""
+    """Precarga porcentajes una vez por hoja mensual."""
+    if PCTS_CARGADOS_SHEET == get_sheet_name():
+        return
+
     try:
         t = threading.Thread(target=actualizar_pcts_desde_sheets, daemon=True)
         t.start()
@@ -442,99 +443,99 @@ def precargar_pcts_en_background():
         print(f"⚠️ No se pudo iniciar precarga de PCT: {e}")
 
 def get_sheet():
+    """Conecta con Google Sheets y reutiliza la hoja mensual en memoria."""
     sheet_name = get_sheet_name()
-    """Conecta con Google Sheets y asegura que exista la hoja del mes actual.
-    Si no existe, la crea duplicando la hoja de plantilla 'F. Template'."""
+    cached_sheet = SHEETS_CACHE.get(sheet_name)
+    if cached_sheet is not None:
+        return cached_sheet
+
     spreadsheet_id = os.getenv("SPREADSHEET_ID")
     creds_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
 
     if not spreadsheet_id or not creds_json:
         raise ValueError("Faltan variables de entorno de Google Sheets")
 
-    creds_info = json.loads(creds_json)
-    creds = Credentials.from_service_account_info(creds_info, scopes=SCOPE)
+    with SHEETS_CACHE_LOCK:
+        cached_sheet = SHEETS_CACHE.get(sheet_name)
+        if cached_sheet is not None:
+            return cached_sheet
 
-    client = gspread.authorize(creds)
-    spreadsheet = client.open_by_key(spreadsheet_id)
+        creds_info = json.loads(creds_json)
+        creds = Credentials.from_service_account_info(creds_info, scopes=SCOPE)
+        client = gspread.authorize(creds)
+        spreadsheet = client.open_by_key(spreadsheet_id)
 
-    try:
-        sheet = spreadsheet.worksheet(sheet_name)
-        return sheet
-    except WorksheetNotFound:
         try:
-            template_sheet = spreadsheet.worksheet("F. Template")
-            source_sheet_id = template_sheet.id
-
-            body = {
-                "requests": [
-                    {
-                        "duplicateSheet": {
-                            "sourceSheetId": source_sheet_id,
-                            "newSheetName": sheet_name
-                        }
-                    }
-                ]
-            }
-
-            spreadsheet.batch_update(body)
             sheet = spreadsheet.worksheet(sheet_name)
-            print(f"✅ Hoja '{SHEET_NAME}' creada a partir de 'F. Template'.")
-            return sheet
+        except WorksheetNotFound:
+            try:
+                template_sheet = spreadsheet.worksheet("F. Template")
+                source_sheet_id = template_sheet.id
+
+                body = {
+                    "requests": [
+                        {
+                            "duplicateSheet": {
+                                "sourceSheetId": source_sheet_id,
+                                "newSheetName": sheet_name
+                            }
+                        }
+                    ]
+                }
+
+                spreadsheet.batch_update(body)
+                sheet = spreadsheet.worksheet(sheet_name)
+                print(f"✅ Hoja '{sheet_name}' creada a partir de 'F. Template'.")
+            except Exception as e:
+                print(f"❌ Error creando hoja desde template: {e}")
+                import traceback
+                traceback.print_exc()
+                raise
         except Exception as e:
-            print(f"❌ Error creando hoja desde template: {e}")
+            print(f"❌ Error al obtener la hoja: {e}")
             import traceback
             traceback.print_exc()
             raise
-    except Exception as e:
-        print(f"❌ Error al obtener la hoja: {e}")
-        import traceback
-        traceback.print_exc()
-        raise
 
-def encontrar_fila_total_categoria(categoria):
-    """Devuelve la fila donde está 'Total' en columna C para la categoría dada.
-    La nueva transacción se insertará en esa posición, empujando 'Total' hacia abajo."""
+        SHEETS_CACHE[sheet_name] = sheet
+        return sheet
+
+def encontrar_ultima_fila_categoria(categoria):
+    """Determina la próxima fila disponible para una categoría dada."""
     try:
         sheet = get_sheet()
 
-        # Buscar cabecera de la categoría en columna B
         cell = sheet.find(categoria, in_column=2)
         if not cell:
-            return None, sheet
+            return len(sheet.col_values(1)) + 1
 
         cabecera_fila = cell.row
 
-        # Buscar la siguiente cabecera de categoría en columna B (límite de búsqueda)
         col_b = sheet.col_values(2)
-        proxima_cabecera_fila = len(col_b) + 2
+        proxima_cabecera_fila = None
         for r in range(cabecera_fila + 1, len(col_b) + 1):
             val_b = col_b[r - 1].strip() if r - 1 < len(col_b) else ""
             if val_b in CATEGORIAS_FIJAS:
                 proxima_cabecera_fila = r
                 break
 
-        # Buscar "Total" en columna C dentro de la sección de la categoría
-        col_c = sheet.col_values(3)
-        for r in range(cabecera_fila + 1, proxima_cabecera_fila):
-            valor_c = col_c[r - 1].strip() if r - 1 < len(col_c) else ""
-            if valor_c.lower() == "total":
-                print(f"✅ Fila 'Total' encontrada en fila {r} para categoría '{categoria}'")
-                return r, sheet
+        if not proxima_cabecera_fila:
+            proxima_cabecera_fila = len(sheet.col_values(3)) + 1
 
-        # Fallback: no hay Total, buscar última fila con datos + 1
-        print(f"⚠️ No se encontró 'Total' para '{categoria}'. Usando fallback.")
+        col_c = sheet.col_values(3)
         ultima_fila_con_datos = cabecera_fila
         for r in range(cabecera_fila + 1, proxima_cabecera_fila):
             valor_c = col_c[r - 1].strip() if r - 1 < len(col_c) else ""
             if valor_c:
                 ultima_fila_con_datos = r
-        return ultima_fila_con_datos + 1, sheet
+
+        return ultima_fila_con_datos + 1
 
     except Exception as e:
         print(f"❌ ERROR al determinar fila de categoría: {e}")
         import traceback
         traceback.print_exc()
-        return None, None
+        return 31
 
 def notificar_pareja(from_number, datos):
     """Notifica a la pareja cuando alguien registra un gasto."""
@@ -824,48 +825,10 @@ def asegurar_fila_vacia_debajo(sheet, fila, force=False):
 
     return True
 
-def actualizar_formula_total(sheet, fila_insertada, col="D"):
-    """Expande la fórmula SUM del Total para incluir la fila recién insertada.
-    Después del insert_rows, Total quedó en fila_insertada+1; la nueva fila
-    es fila_insertada, que puede quedar fuera del rango original del SUM."""
-    try:
-        fila_total = fila_insertada + 1
-        celda_total = f"{col}{fila_total}"
-
-        formula = sheet.acell(celda_total, value_render_option="FORMULA").value
-        if not formula:
-            print(f"⚠️ Celda {celda_total} vacía, no hay fórmula que actualizar.")
-            return
-
-        match = re.search(r'SUM\(([A-Z]+)(\d+):([A-Z]+)(\d+)\)', formula, re.IGNORECASE)
-        if not match:
-            print(f"⚠️ No se encontró SUM en {celda_total}: '{formula}'")
-            return
-
-        col_inicio, fila_inicio = match.group(1), match.group(2)
-        col_fin, fila_fin_actual = match.group(3), int(match.group(4))
-
-        # La nueva fila debe ser el nuevo fin del rango
-        if fila_insertada > fila_fin_actual:
-            nueva_formula = formula[:match.start()] + \
-                f"SUM({col_inicio}{fila_inicio}:{col_fin}{fila_insertada})" + \
-                formula[match.end():]
-            sheet.update([[nueva_formula]], f"{celda_total}", value_input_option="USER_ENTERED")
-            print(f"✅ Fórmula Total actualizada: {formula} → {nueva_formula}")
-        else:
-            print(f"ℹ️ Fórmula Total ya cubre la fila {fila_insertada}: {formula}")
-
-    except Exception as e:
-        print(f"⚠️ No se pudo actualizar fórmula Total: {e}")
-        import traceback
-        traceback.print_exc()
-
 def _guardar_transaccion_en_sheets(from_number, datos, fecha):
     try:
-        fila, sheet = encontrar_fila_total_categoria(datos["categoria"])
-
-        if fila is None or sheet is None:
-            raise ValueError(f"No se pudo determinar la fila para categoría '{datos['categoria']}'")
+        sheet = get_sheet()
+        fila = encontrar_ultima_fila_categoria(datos["categoria"])
 
         nueva_fila = [
             "",               # A
@@ -877,20 +840,8 @@ def _guardar_transaccion_en_sheets(from_number, datos, fecha):
             datos["tipo"]     # G
         ]
 
-        # Insertar fila nueva antes del "Total", empujando Total hacia abajo
-        sheet.insert_rows([nueva_fila], row=fila, value_input_option="USER_ENTERED")
-
-        # Copiar formato de la fila anterior (última transacción existente)
-        try:
-            copiar_formato_fila(sheet, fila_origen=fila - 1, fila_destino=fila, col_end=8)
-        except Exception as e:
-            print(f"⚠️ No se pudo copiar formato: {e}")
-
-        # Expandir fórmula SUM del Total para incluir la nueva fila
-        try:
-            actualizar_formula_total(sheet, fila_insertada=fila)
-        except Exception as e:
-            print(f"⚠️ No se pudo actualizar fórmula Total: {e}")
+        sheet.update(f"A{fila}:G{fila}", [nueva_fila], value_input_option="USER_ENTERED")
+        asegurar_fila_vacia_debajo(sheet, fila, force=(datos["categoria"] == "Otros"))
 
         # Notificar a la pareja solo si Sheets guardó OK
         notificar_pareja(from_number, datos)
