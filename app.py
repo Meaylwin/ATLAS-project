@@ -27,9 +27,9 @@ META_VERIFY_TOKEN = os.getenv("META_VERIFY_TOKEN")
 NUMERO_MANU = os.getenv("NUMERO_MANU")
 NUMERO_CAMI = os.getenv("NUMERO_CAMI")
 
-# Porcentajes para división %
-PCT_MANU = 0.61
-PCT_CAMI = 0.39
+# Porcentajes para división % (respaldo si Sheets todavía no responde)
+PCT_MANU = 0.60
+PCT_CAMI = 0.40
 PCTS_CARGADOS_SHEET = None
 SHEETS_CACHE = {}
 SHEETS_CACHE_LOCK = threading.Lock()
@@ -371,11 +371,11 @@ def enviar_template(to_number, datos, template_name="expense_notification_v1"):
             "error": str(e)
         }
 
-def _parse_pct_cell(cell_value, default=None):
-    """Parsea un valor de celda que puede ser '0.61' o '61%'. Devuelve float o None."""
+def _parse_pct_cell(cell_value):
+    """Parsea un valor de celda que puede ser '0.61', '0,61' o '61%'. Devuelve float o None."""
     if cell_value is None:
         return None
-    s = str(cell_value).strip()
+    s = str(cell_value).strip().replace(",", ".")
     try:
         if s.endswith("%"):
             s = s.rstrip("%")
@@ -391,15 +391,22 @@ def leer_pcts_desde_hoja(sheet):
         manu_val = sheet.acell("D3").value
         cami_val = sheet.acell("D4").value
 
-        manu_parsed = _parse_pct_cell(manu_val, default=None)
-        cami_parsed = _parse_pct_cell(cami_val, default=None)
+        manu_parsed = _parse_pct_cell(manu_val)
+        cami_parsed = _parse_pct_cell(cami_val)
 
         if manu_parsed is not None:
             PCT_MANU = float(manu_parsed)
+        else:
+            print(f"⚠️ D3 no parseable: '{manu_val}' — se mantiene PCT_MANU={PCT_MANU}")
         if cami_parsed is not None:
             PCT_CAMI = float(cami_parsed)
+        else:
+            print(f"⚠️ D4 no parseable: '{cami_val}' — se mantiene PCT_CAMI={PCT_CAMI}")
+
+        return manu_parsed is not None and cami_parsed is not None
     except Exception as e:
         print(f"⚠️ No se pudieron leer PCT desde hoja: {e}")
+        return False
 
 def _pct_label_actual():
     """Devuelve la etiqueta actual de división usando los PCT ya cargados."""
@@ -424,9 +431,12 @@ def actualizar_pcts_desde_sheets():
 
         try:
             sheet = get_sheet()
-            leer_pcts_desde_hoja(sheet)
-            PCTS_CARGADOS_SHEET = sheet_name
-            print(f"✅ PCT actualizados desde Sheets: Manu={PCT_MANU}, Cami={PCT_CAMI}")
+            ok = leer_pcts_desde_hoja(sheet)
+            if ok:
+                PCTS_CARGADOS_SHEET = sheet_name
+                print(f"✅ PCT actualizados desde Sheets: Manu={PCT_MANU}, Cami={PCT_CAMI}")
+            else:
+                print(f"⚠️ PCT no actualizados (valores no parseables). Usando: Manu={PCT_MANU}, Cami={PCT_CAMI}")
         except Exception as e:
             print(f"⚠️ No se pudieron actualizar PCT desde Sheets: {e}")
 
@@ -750,39 +760,43 @@ def manejar_tipo_division(from_number, respuesta):
         send_meta_message(from_number, f"❌ Error: {str(e)}")
 
 def copiar_formato_fila(sheet, fila_origen, fila_destino, col_end=8):
-    """Copia el formato de una fila y quita el borde superior de la fila destino."""
+    """Copia formato y validaciones de una fila y quita el borde superior."""
     sheet_id = sheet._properties["sheetId"]
+
+    base_range = {
+        "sheetId": sheet_id,
+        "startRowIndex": fila_origen - 1,
+        "endRowIndex": fila_origen,
+        "startColumnIndex": 0,
+        "endColumnIndex": col_end,
+    }
+    destino_range = {
+        "sheetId": sheet_id,
+        "startRowIndex": fila_destino - 1,
+        "endRowIndex": fila_destino,
+        "startColumnIndex": 0,
+        "endColumnIndex": col_end,
+    }
 
     sheet.spreadsheet.batch_update({
         "requests": [
             {
                 "copyPaste": {
-                    "source": {
-                        "sheetId": sheet_id,
-                        "startRowIndex": fila_origen - 1,
-                        "endRowIndex": fila_origen,
-                        "startColumnIndex": 0,
-                        "endColumnIndex": col_end,
-                    },
-                    "destination": {
-                        "sheetId": sheet_id,
-                        "startRowIndex": fila_destino - 1,
-                        "endRowIndex": fila_destino,
-                        "startColumnIndex": 0,
-                        "endColumnIndex": col_end,
-                    },
+                    "source": base_range,
+                    "destination": destino_range,
                     "pasteType": "PASTE_FORMAT",
                 }
             },
             {
+                "copyPaste": {
+                    "source": base_range,
+                    "destination": destino_range,
+                    "pasteType": "PASTE_DATA_VALIDATION",
+                }
+            },
+            {
                 "updateBorders": {
-                    "range": {
-                        "sheetId": sheet_id,
-                        "startRowIndex": fila_destino - 1,
-                        "endRowIndex": fila_destino,
-                        "startColumnIndex": 0,
-                        "endColumnIndex": col_end,
-                    },
+                    "range": destino_range,
                     "top": {"style": "NONE"},
                 }
             },
@@ -817,27 +831,37 @@ def _guardar_transaccion_en_sheets(from_number, datos, fecha):
         sheet = get_sheet()
         fila_total, fila_cabecera = encontrar_fila_total_categoria(datos["categoria"])
 
+        fila_ultima_transaccion = fila_total - 1
+        fila_nueva = fila_ultima_transaccion + 1
+
         nueva_fila = [
             "",               # A
             "",               # B
             datos["tienda"],  # C
             datos["monto"],   # D
-            fecha,            # E
-            datos["pagador"], # F
-            datos["tipo"]     # G
+            datos["pagador"], # E
+            datos["tipo"],    # F
+            fecha             # G
         ]
 
-        sheet.insert_rows([nueva_fila], row=fila_total, value_input_option="USER_ENTERED")
+        # Inserta debajo de la última transacción y antes de Total.
+        sheet.insert_rows([nueva_fila], row=fila_nueva, value_input_option="USER_ENTERED")
 
-        if fila_total - 1 > fila_cabecera:
+        # La fila insertada hereda el formato de la última transacción.
+        if fila_ultima_transaccion > fila_cabecera:
             try:
-                copiar_formato_fila(sheet, fila_origen=fila_total - 1, fila_destino=fila_total, col_end=8)
+                copiar_formato_fila(
+                    sheet,
+                    fila_origen=fila_ultima_transaccion,
+                    fila_destino=fila_nueva,
+                    col_end=8,
+                )
             except Exception as e:
                 print("⚠️ No se pudo copiar formato:", e)
 
-        total_fila = fila_total + 1
+        total_fila = fila_nueva + 1
         primera_fila_suma = fila_cabecera
-        formula_total = f"=SUM(D{primera_fila_suma}:D{fila_total})"
+        formula_total = f"=SUM(D{primera_fila_suma}:D{fila_nueva})"
         sheet.update(
             f"D{total_fila}",
             [[formula_total]],
