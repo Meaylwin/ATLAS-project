@@ -831,8 +831,7 @@ def _guardar_transaccion_en_sheets(from_number, datos, fecha):
         sheet = get_sheet()
         fila_total, fila_cabecera = encontrar_fila_total_categoria(datos["categoria"])
 
-        fila_ultima_transaccion = fila_total - 1
-        fila_nueva = fila_ultima_transaccion + 1
+        fila_previa = fila_total - 1
 
         nueva_fila = [
             "",               # A
@@ -840,26 +839,41 @@ def _guardar_transaccion_en_sheets(from_number, datos, fecha):
             datos["tienda"],  # C
             datos["monto"],   # D
             datos["pagador"], # E
-            datos["tipo"],    # F
+            f"'{datos['tipo']}",  # F (apóstrofe: texto, evita que "100%" pase a 1)
             fecha             # G
         ]
 
-        # Inserta debajo de la última transacción y antes de Total.
-        sheet.insert_rows([nueva_fila], row=fila_nueva, value_input_option="USER_ENTERED")
+        # Fila vacía de reserva (p. ej. la fila del template) justo antes de Total:
+        # se reutiliza en vez de insertar otra. Solo se revisa esa fila.
+        celda_previa = sheet.acell(f"C{fila_previa}").value or ""
+        reutilizar_fila = fila_previa > fila_cabecera and celda_previa.strip() == ""
 
-        # La fila insertada hereda el formato de la última transacción.
-        if fila_ultima_transaccion > fila_cabecera:
-            try:
-                copiar_formato_fila(
-                    sheet,
-                    fila_origen=fila_ultima_transaccion,
-                    fila_destino=fila_nueva,
-                    col_end=8,
-                )
-            except Exception as e:
-                print("⚠️ No se pudo copiar formato:", e)
+        if reutilizar_fila:
+            fila_nueva = fila_previa
+            sheet.update(
+                f"C{fila_nueva}:G{fila_nueva}",
+                [nueva_fila[2:]],
+                value_input_option="USER_ENTERED"
+            )
+            total_fila = fila_total
+        else:
+            # Inserta debajo de la última transacción y antes de Total.
+            fila_nueva = fila_total
+            sheet.insert_rows([nueva_fila], row=fila_nueva, value_input_option="USER_ENTERED")
 
-        total_fila = fila_nueva + 1
+            # La fila insertada hereda el formato de la última transacción.
+            if fila_previa > fila_cabecera:
+                try:
+                    copiar_formato_fila(
+                        sheet,
+                        fila_origen=fila_previa,
+                        fila_destino=fila_nueva,
+                        col_end=8,
+                    )
+                except Exception as e:
+                    print("⚠️ No se pudo copiar formato:", e)
+
+            total_fila = fila_nueva + 1
         primera_fila_suma = fila_cabecera
         formula_total = f"=SUM(D{primera_fila_suma}:D{fila_nueva})"
         sheet.update(
