@@ -926,6 +926,8 @@ def webhook():
                         recipient = status.get("recipient_id")
                         timestamp = status.get("timestamp")
                         print(f"STATUS: id={status_id} to={recipient} status={status_text} ts={timestamp}")
+                        if status_text == "failed":
+                            print(f"❌ ENTREGA FALLIDA to={recipient} errors={status.get('errors')}")
 
                     # Mensajes entrantes
                     for message in value.get("messages", []):
