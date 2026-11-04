@@ -152,6 +152,22 @@ def texto_deuda_para_destinatario(to_number, datos):
     # Caso genérico
     return f"Saldo ${format_number_dot(monto_deuda)}"
 
+def texto_resumen_gasto(to_number, datos):
+    """Resumen del gasto como texto normal (mismo contenido que la plantilla, sin botón)."""
+    linea = "━━━━━━━━━━━━━━━━━━━━"
+    return (
+        "*Nuevo gasto registrado*\n"
+        f"{linea}\n"
+        f"📝 {datos.get('tienda', '')}\n"
+        f"💵 {format_number_dot(datos.get('monto', 0))}\n"
+        f"📂 {datos.get('categoria', '')}\n"
+        f"💳 Pagó: {datos.get('pagador', '')}\n"
+        f"📊 División: {datos.get('tipo', '')}\n\n"
+        f"💰 *{texto_deuda_para_destinatario(to_number, datos)}*\n"
+        f"{linea}\n"
+        f"📄 Se guardará en *{get_sheet_name()}* 📄"
+    )
+
 def send_meta_message(to_number, message):
     """Envía mensaje de texto con Meta Cloud API."""
     try:
@@ -715,24 +731,12 @@ def manejar_tipo_division(from_number, respuesta):
             )
             return
 
-        # Enviar plantilla al emisor tan pronto como tengamos los datos
+        # Resumen al emisor como mensaje normal (ventana de 24 h abierta: no usa plantilla)
         datos_preparados = preparar_datos_transaccion(datos, tipo)
         try:
-            resultado_template = enviar_template(
-                from_number,
-                datos_preparados,
-                template_name="expense_notification_v1"
-            )
-
-            if not resultado_template.get("ok"):
-                print("❌ Falló template al emisor:", resultado_template)
-                send_meta_message(
-                    from_number,
-                    "⚠️ Se registró el gasto, pero no pude enviar la notificación final por template."
-                )
-
+            send_meta_message(from_number, texto_resumen_gasto(from_number, datos_preparados))
         except Exception as e:
-            print(f"❌ ERROR enviando plantilla: {e}")
+            print(f"❌ ERROR enviando resumen al emisor: {e}")
             import traceback
             traceback.print_exc()
 
