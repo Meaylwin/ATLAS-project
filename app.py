@@ -54,7 +54,7 @@ MESES_ES = [
 ]
 def get_sheet_name():
     ahora = datetime.now(CHILE_TZ)
-    return f"{MESES_ES[ahora.month - 1]}"
+    return f"F. {MESES_ES[ahora.month - 1]}"
 
 def _norm_num(n):
     return re.sub(r"\D", "", str(n or ""))
@@ -479,7 +479,7 @@ def get_sheet():
             sheet = spreadsheet.worksheet(sheet_name)
         except WorksheetNotFound:
             try:
-                template_sheet = spreadsheet.worksheet("Template")
+                template_sheet = spreadsheet.worksheet("F. Template")
                 source_sheet_id = template_sheet.id
 
                 body = {
@@ -495,7 +495,7 @@ def get_sheet():
 
                 spreadsheet.batch_update(body)
                 sheet = spreadsheet.worksheet(sheet_name)
-                print(f"✅ Hoja '{sheet_name}' creada a partir de 'Template'.")
+                print(f"✅ Hoja '{sheet_name}' creada a partir de 'F. Template'.")
             except Exception as e:
                 print(f"❌ Error creando hoja desde template: {e}")
                 import traceback
