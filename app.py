@@ -154,7 +154,7 @@ def texto_deuda_para_destinatario(to_number, datos):
 
 def texto_resumen_gasto(to_number, datos):
     """Resumen del gasto como texto normal (mismo contenido que la plantilla, sin botón)."""
-    linea = "━━━━━━━━━━━━━━━━━"
+    linea = "━━━━━━━━━━━━━━━"
     return (
         "*Nuevo gasto registrado*\n"
         f"{linea}\n"
